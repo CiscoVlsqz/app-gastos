@@ -1,0 +1,10 @@
+# Salida del build: la regenera GitHub Actions en cada deploy
+dist/
+
+# Python
+__pycache__/
+*.pyc
+
+# SO / editores
+.DS_Store
+Thumbs.db

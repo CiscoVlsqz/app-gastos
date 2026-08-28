@@ -1,0 +1,820 @@
+<script>
+(function () {
+  'use strict';
+
+  // ---- Api ----
+  // - Preview local en el navegador: usa window.MockApi (mock-api.js).
+  // - App publicada: JSONP contra la web app de Apps Script. No se puede usar
+  //   fetch() porque Apps Script no manda headers de CORS; un <script src> los
+  //   esquiva. Por eso todo va por GET con ?fn=&args=&callback=.
+  // El build web reemplaza '__API_URL__' por la URL /exec real.
+  var API_URL = '__API_URL__';
+  var jsonpSeq = 0;
+
+  var Api = {
+    call: function (fn) {
+      var args = Array.prototype.slice.call(arguments, 1);
+
+      if (window.MockApi && typeof window.MockApi[fn] === 'function') {
+        return Promise.resolve().then(function () {
+          return window.MockApi[fn].apply(null, args);
+        });
+      }
+
+      return new Promise(function (resolve, reject) {
+        var cb = '__jsonp' + Date.now() + '_' + (++jsonpSeq);
+        var script = document.createElement('script');
+        var timer = setTimeout(function () {
+          finish();
+          reject(new Error('No se pudo conectar con el servidor'));
+        }, 20000);
+
+        function finish() {
+          clearTimeout(timer);
+          try { delete window[cb]; } catch (e) { window[cb] = undefined; }
+          if (script.parentNode) script.parentNode.removeChild(script);
+        }
+
+        window[cb] = function (res) {
+          finish();
+          if (!res || res.ok !== true) {
+            reject(new Error(res && res.error ? res.error : 'Error del servidor'));
+          } else {
+            resolve(res.data);
+          }
+        };
+
+        script.onerror = function () {
+          finish();
+          reject(new Error('No se pudo conectar con el servidor'));
+        };
+
+        script.src = API_URL +
+          '?fn=' + encodeURIComponent(fn) +
+          '&args=' + encodeURIComponent(JSON.stringify(args)) +
+          '&callback=' + cb +
+          '&_=' + Date.now();
+        document.head.appendChild(script);
+      });
+    }
+  };
+
+  var state = {
+    categorias: [],
+    personas: [],
+    categoriaSel: null,
+    personaSel: null,
+    editId: null,
+    editPersonaSel: null,
+    addPersonaSel: null
+  };
+
+  var els = {
+    subtitle: document.getElementById('subtitle'),
+    catSelect: document.getElementById('cat-select'),
+    personaToggle: document.getElementById('persona-toggle'),
+    monto: document.getElementById('input-monto'),
+    fecha: document.getElementById('input-fecha'),
+    nota: document.getElementById('input-nota'),
+    btnGuardar: document.getElementById('btn-guardar'),
+    toast: document.getElementById('toast'),
+    historialList: document.getElementById('historial-list'),
+    resumenTotalVal: document.getElementById('resumen-total-val'),
+    resumenMesLabel: document.getElementById('resumen-mes-label'),
+    resumenInsight: document.getElementById('resumen-insight'),
+    trendWrap: document.getElementById('trend-wrap'),
+    trendSvg: document.getElementById('trend-svg'),
+    trendTooltip: document.getElementById('trend-tooltip'),
+    resumenCategorias: document.getElementById('resumen-categorias'),
+    resumenPersonas: document.getElementById('resumen-personas'),
+    btnTheme: document.getElementById('btn-theme'),
+    btnSettings: document.getElementById('btn-settings'),
+    editOverlay: document.getElementById('edit-overlay'),
+    editClose: document.getElementById('edit-close'),
+    editMonto: document.getElementById('edit-monto'),
+    editCatSelect: document.getElementById('edit-cat-select'),
+    editPersonaToggle: document.getElementById('edit-persona-toggle'),
+    editFecha: document.getElementById('edit-fecha'),
+    editNota: document.getElementById('edit-nota'),
+    editSave: document.getElementById('edit-save'),
+    editDelete: document.getElementById('edit-delete'),
+    fabAdd: document.getElementById('fab-add'),
+    addOverlay: document.getElementById('add-overlay'),
+    addClose: document.getElementById('add-close'),
+    addMonto: document.getElementById('add-monto'),
+    addCatSelect: document.getElementById('add-cat-select'),
+    addPersonaToggle: document.getElementById('add-persona-toggle'),
+    addFecha: document.getElementById('add-fecha'),
+    addNota: document.getElementById('add-nota'),
+    addSave: document.getElementById('add-save'),
+    catOverlay: document.getElementById('cat-overlay'),
+    catModalClose: document.getElementById('cat-modal-close'),
+    catManageList: document.getElementById('cat-manage-list'),
+    newCatIcono: document.getElementById('new-cat-icono'),
+    newCatNombre: document.getElementById('new-cat-nombre'),
+    newCatAdd: document.getElementById('new-cat-add')
+  };
+
+  function fmt(n) {
+    return '$' + Math.round(n).toLocaleString('es-AR');
+  }
+
+  function todayISO() {
+    var d = new Date();
+    var tz = d.getTimezoneOffset() * 60000;
+    return new Date(d - tz).toISOString().slice(0, 10);
+  }
+
+  function showToast(msg) {
+    els.toast.textContent = msg;
+    els.toast.classList.add('show');
+    setTimeout(function () { els.toast.classList.remove('show'); }, 1800);
+  }
+
+  function updateGuardarState() {
+    var monto = parseFloat(els.monto.value);
+    els.btnGuardar.disabled = !(monto > 0 && state.categoriaSel && state.personaSel);
+  }
+
+  // ---------- Tema ----------
+  var ICON_SUN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+    '<circle cx="12" cy="12" r="4"></circle>' +
+    '<line x1="12" y1="2" x2="12" y2="4"></line>' +
+    '<line x1="12" y1="20" x2="12" y2="22"></line>' +
+    '<line x1="4.2" y1="4.2" x2="5.6" y2="5.6"></line>' +
+    '<line x1="18.4" y1="18.4" x2="19.8" y2="19.8"></line>' +
+    '<line x1="2" y1="12" x2="4" y2="12"></line>' +
+    '<line x1="20" y1="12" x2="22" y2="12"></line>' +
+    '<line x1="4.2" y1="19.8" x2="5.6" y2="18.4"></line>' +
+    '<line x1="18.4" y1="5.6" x2="19.8" y2="4.2"></line>' +
+    '</svg>';
+  var ICON_MOON = '<svg viewBox="0 0 24 24" fill="currentColor" stroke="none">' +
+    '<path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5Z"></path>' +
+    '</svg>';
+
+  function applyTheme(theme) {
+    document.documentElement.classList.toggle('dark', theme === 'dark');
+    els.btnTheme.innerHTML = theme === 'dark' ? ICON_SUN : ICON_MOON;
+  }
+
+  function initTheme() {
+    var saved = localStorage.getItem('theme');
+    if (!saved) {
+      saved = (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light';
+    }
+    applyTheme(saved);
+  }
+
+  els.btnTheme.addEventListener('click', function () {
+    var next = document.documentElement.classList.contains('dark') ? 'light' : 'dark';
+    localStorage.setItem('theme', next);
+    applyTheme(next);
+  });
+
+  // ---------- Cargar gasto ----------
+  function renderCategoriaSelect(selectEl, selected) {
+    selectEl.innerHTML = '';
+    var placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = 'Elegí una categoría';
+    placeholder.disabled = true;
+    if (!selected) placeholder.selected = true;
+    selectEl.appendChild(placeholder);
+
+    state.categorias.forEach(function (c) {
+      var opt = document.createElement('option');
+      opt.value = c.nombre;
+      opt.textContent = c.icono + ' ' + c.nombre;
+      if (c.nombre === selected) opt.selected = true;
+      selectEl.appendChild(opt);
+    });
+  }
+
+  els.catSelect.addEventListener('change', function () {
+    state.categoriaSel = els.catSelect.value || null;
+    updateGuardarState();
+  });
+
+  function renderPersonas() {
+    els.personaToggle.innerHTML = '';
+    state.personas.forEach(function (p) {
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.textContent = p;
+      btn.addEventListener('click', function () {
+        state.personaSel = p;
+        Array.prototype.forEach.call(els.personaToggle.children, function (el) {
+          el.classList.toggle('active', el.textContent === p);
+        });
+        updateGuardarState();
+      });
+      els.personaToggle.appendChild(btn);
+    });
+  }
+
+  els.monto.addEventListener('input', function () {
+    els.monto.value = els.monto.value.replace(/[^0-9.,]/g, '');
+    updateGuardarState();
+  });
+
+  els.btnGuardar.addEventListener('click', function () {
+    var monto = parseFloat(els.monto.value.replace(',', '.'));
+    if (!(monto > 0) || !state.categoriaSel || !state.personaSel) return;
+
+    els.btnGuardar.disabled = true;
+    els.btnGuardar.textContent = 'Guardando…';
+
+    Api.call('addMovimiento', {
+      categoria: state.categoriaSel,
+      monto: monto,
+      pagadoPor: state.personaSel,
+      fecha: els.fecha.value || todayISO(),
+      nota: els.nota.value.trim()
+    }).then(function () {
+      showToast('Gasto guardado ✓');
+      els.monto.value = '';
+      els.nota.value = '';
+      state.categoriaSel = null;
+      els.catSelect.value = '';
+      state.personaSel = null;
+      Array.prototype.forEach.call(els.personaToggle.children, function (el) { el.classList.remove('active'); });
+      loadHistorial();
+      loadResumen();
+    }).catch(function (err) {
+      showToast('Error: ' + (err && err.message ? err.message : err));
+    }).finally(function () {
+      els.btnGuardar.textContent = 'Guardar gasto';
+      updateGuardarState();
+    });
+  });
+
+  // ---------- Historial ----------
+  function diaLabel(iso) {
+    var hoy = todayISO();
+    var ayerDate = new Date();
+    ayerDate.setDate(ayerDate.getDate() - 1);
+    var ayer = new Date(ayerDate - ayerDate.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+    if (iso === hoy) return 'Hoy';
+    if (iso === ayer) return 'Ayer';
+    var d = new Date(iso + 'T12:00:00');
+    return d.toLocaleDateString('es-AR', { day: 'numeric', month: 'long' });
+  }
+
+  function iconFor(nombre) {
+    var c = state.categorias.find(function (c) { return c.nombre === nombre; });
+    return c ? c.icono : '💸';
+  }
+
+  function renderHistorial(movs) {
+    els.historialList.innerHTML = '';
+    if (!movs.length) {
+      els.historialList.innerHTML = '<div class="empty">Todavía no cargaron ningún gasto.</div>';
+      return;
+    }
+
+    var grupos = {};
+    var orden = [];
+    movs.forEach(function (m) {
+      if (!grupos[m.fecha]) { grupos[m.fecha] = []; orden.push(m.fecha); }
+      grupos[m.fecha].push(m);
+    });
+
+    orden.forEach(function (fecha) {
+      var group = document.createElement('div');
+      group.className = 'day-group';
+      var label = document.createElement('div');
+      label.className = 'day-label';
+      label.textContent = diaLabel(fecha);
+      group.appendChild(label);
+
+      grupos[fecha].forEach(function (m) {
+        var item = document.createElement('div');
+        item.className = 'mov-item';
+        item.innerHTML =
+          '<div class="icon">' + iconFor(m.categoria) + '</div>' +
+          '<div class="info">' +
+            '<div class="cat">' + m.categoria + '</div>' +
+            '<div class="meta">' + m.pagadoPor + (m.nota ? ' · ' + m.nota : '') + '</div>' +
+          '</div>' +
+          '<div class="amount">' + fmt(m.monto) + '</div>';
+        item.addEventListener('click', function () { openEditModal(m); });
+        group.appendChild(item);
+      });
+
+      els.historialList.appendChild(group);
+    });
+  }
+
+  function loadHistorial() {
+    Api.call('getMovimientos', 200).then(renderHistorial);
+  }
+
+  // ---------- Agregar gasto (modal desde Historial) ----------
+  function openAddModal() {
+    state.addPersonaSel = null;
+    els.addMonto.value = '';
+    els.addNota.value = '';
+    els.addFecha.value = todayISO();
+    renderCategoriaSelect(els.addCatSelect, null);
+
+    els.addPersonaToggle.innerHTML = '';
+    state.personas.forEach(function (p) {
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.textContent = p;
+      btn.addEventListener('click', function () {
+        state.addPersonaSel = p;
+        Array.prototype.forEach.call(els.addPersonaToggle.children, function (el) {
+          el.classList.toggle('active', el.textContent === p);
+        });
+      });
+      els.addPersonaToggle.appendChild(btn);
+    });
+
+    els.addOverlay.hidden = false;
+  }
+
+  function closeAddModal() {
+    els.addOverlay.hidden = true;
+  }
+
+  els.fabAdd.addEventListener('click', openAddModal);
+  els.addClose.addEventListener('click', closeAddModal);
+  els.addOverlay.addEventListener('click', function (e) {
+    if (e.target === els.addOverlay) closeAddModal();
+  });
+
+  els.addMonto.addEventListener('input', function () {
+    els.addMonto.value = els.addMonto.value.replace(/[^0-9.,]/g, '');
+  });
+
+  els.addSave.addEventListener('click', function () {
+    var monto = parseFloat(els.addMonto.value.replace(',', '.'));
+    var categoria = els.addCatSelect.value;
+    if (!(monto > 0) || !categoria || !state.addPersonaSel) {
+      showToast('Completá monto, categoría y quién pagó');
+      return;
+    }
+    els.addSave.disabled = true;
+    els.addSave.textContent = 'Guardando…';
+    Api.call('addMovimiento', {
+      categoria: categoria,
+      monto: monto,
+      pagadoPor: state.addPersonaSel,
+      fecha: els.addFecha.value || todayISO(),
+      nota: els.addNota.value.trim()
+    }).then(function () {
+      showToast('Gasto guardado ✓');
+      closeAddModal();
+      loadHistorial();
+      loadResumen();
+    }).catch(function (err) {
+      showToast('Error: ' + (err && err.message ? err.message : err));
+    }).finally(function () {
+      els.addSave.disabled = false;
+      els.addSave.textContent = 'Guardar gasto';
+    });
+  });
+
+  // ---------- Editar gasto ----------
+  function openEditModal(m) {
+    state.editId = m.id;
+    state.editPersonaSel = m.pagadoPor;
+    els.editMonto.value = m.monto;
+    renderCategoriaSelect(els.editCatSelect, m.categoria);
+    els.editFecha.value = m.fecha;
+    els.editNota.value = m.nota || '';
+
+    els.editPersonaToggle.innerHTML = '';
+    state.personas.forEach(function (p) {
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.textContent = p;
+      btn.classList.toggle('active', p === m.pagadoPor);
+      btn.addEventListener('click', function () {
+        state.editPersonaSel = p;
+        Array.prototype.forEach.call(els.editPersonaToggle.children, function (el) {
+          el.classList.toggle('active', el.textContent === p);
+        });
+      });
+      els.editPersonaToggle.appendChild(btn);
+    });
+
+    els.editOverlay.hidden = false;
+  }
+
+  function closeEditModal() {
+    els.editOverlay.hidden = true;
+    state.editId = null;
+  }
+
+  els.editClose.addEventListener('click', closeEditModal);
+  els.editOverlay.addEventListener('click', function (e) {
+    if (e.target === els.editOverlay) closeEditModal();
+  });
+
+  els.editSave.addEventListener('click', function () {
+    var monto = parseFloat(els.editMonto.value.replace(',', '.'));
+    var categoria = els.editCatSelect.value;
+    if (!(monto > 0) || !categoria || !state.editPersonaSel) {
+      showToast('Completá monto, categoría y quién pagó');
+      return;
+    }
+    els.editSave.disabled = true;
+    Api.call('updateMovimiento', {
+      id: state.editId,
+      categoria: categoria,
+      monto: monto,
+      pagadoPor: state.editPersonaSel,
+      fecha: els.editFecha.value || todayISO(),
+      nota: els.editNota.value.trim()
+    }).then(function () {
+      showToast('Gasto actualizado ✓');
+      closeEditModal();
+      loadHistorial();
+      loadResumen();
+    }).catch(function (err) {
+      showToast('Error: ' + (err && err.message ? err.message : err));
+    }).finally(function () {
+      els.editSave.disabled = false;
+    });
+  });
+
+  els.editDelete.addEventListener('click', function () {
+    if (!confirm('¿Borrar este gasto?')) return;
+    Api.call('deleteMovimiento', state.editId).then(function () {
+      showToast('Gasto borrado');
+      closeEditModal();
+      loadHistorial();
+      loadResumen();
+    });
+  });
+
+  // ---------- Resumen: curva de gastos por día ----------
+  var SERIES_COLORS = [
+    'var(--series-1)', 'var(--series-2)', 'var(--series-3)', 'var(--series-4)',
+    'var(--series-5)', 'var(--series-6)', 'var(--series-7)'
+  ];
+  var OTROS_COLOR = 'var(--muted)';
+
+  function smoothPath(pts) {
+    if (!pts.length) return '';
+    var d = 'M' + pts[0].x.toFixed(1) + ',' + pts[0].y.toFixed(1);
+    for (var i = 0; i < pts.length - 1; i++) {
+      var p0 = pts[i], p1 = pts[i + 1];
+      var midX = (p0.x + p1.x) / 2;
+      d += ' C ' + midX.toFixed(1) + ',' + p0.y.toFixed(1) + ' ' + midX.toFixed(1) + ',' + p1.y.toFixed(1) + ' ' + p1.x.toFixed(1) + ',' + p1.y.toFixed(1);
+    }
+    return d;
+  }
+
+  var trendState = null;
+  var trendDotEl = null;
+
+  function isoForDia(dia) {
+    var now = new Date();
+    var mm = String(now.getMonth() + 1).padStart(2, '0');
+    var dd = String(dia).padStart(2, '0');
+    return now.getFullYear() + '-' + mm + '-' + dd;
+  }
+
+  function buildTrend(porDia, diaActual) {
+    var svg = els.trendSvg;
+    var ns = 'http://www.w3.org/2000/svg';
+    while (svg.firstChild) svg.removeChild(svg.firstChild);
+
+    // El viewBox se arma con el ancho real en píxeles del contenedor para que
+    // 1 unidad = 1px y el trazo no se estire de forma no uniforme (grosor
+    // "elástico") ni se salga del recuadro.
+    var W = Math.round(svg.parentElement.getBoundingClientRect().width) || 300;
+    var H = 100, padTop = 12, padBottom = 12;
+    svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
+
+    var days = [];
+    for (var d = 1; d <= diaActual; d++) days.push(porDia[d] || 0);
+
+    var n = days.length;
+    var max = Math.max.apply(null, days.concat([1]));
+    var baseline = H - padBottom;
+
+    var points = days.map(function (val, i) {
+      var x = n > 1 ? (i / (n - 1)) * W : W / 2;
+      var y = baseline - (val / max) * (H - padTop - padBottom);
+      return { x: x, y: y };
+    });
+
+    trendState = { points: points, days: days, W: W, H: H };
+
+    var defs = document.createElementNS(ns, 'defs');
+    var grad = document.createElementNS(ns, 'linearGradient');
+    grad.setAttribute('id', 'trendGradient');
+    grad.setAttribute('x1', '0'); grad.setAttribute('y1', '0');
+    grad.setAttribute('x2', '0'); grad.setAttribute('y2', '1');
+    var stop1 = document.createElementNS(ns, 'stop');
+    stop1.setAttribute('offset', '0%');
+    stop1.setAttribute('style', 'stop-color:var(--series-1);stop-opacity:0.35');
+    var stop2 = document.createElementNS(ns, 'stop');
+    stop2.setAttribute('offset', '100%');
+    stop2.setAttribute('style', 'stop-color:var(--series-1);stop-opacity:0');
+    grad.appendChild(stop1);
+    grad.appendChild(stop2);
+    defs.appendChild(grad);
+    svg.appendChild(defs);
+
+    var baseLine = document.createElementNS(ns, 'line');
+    baseLine.setAttribute('x1', 0);
+    baseLine.setAttribute('x2', W);
+    baseLine.setAttribute('y1', baseline);
+    baseLine.setAttribute('y2', baseline);
+    baseLine.setAttribute('stroke', 'var(--border)');
+    baseLine.setAttribute('stroke-width', 1);
+    baseLine.setAttribute('stroke-dasharray', '3 4');
+    svg.appendChild(baseLine);
+
+    if (points.length > 1) {
+      var linePath = smoothPath(points);
+      var last = points[points.length - 1];
+      var first = points[0];
+      var areaPath = linePath + ' L' + last.x.toFixed(1) + ',' + baseline + ' L' + first.x.toFixed(1) + ',' + baseline + ' Z';
+
+      var area = document.createElementNS(ns, 'path');
+      area.setAttribute('d', areaPath);
+      area.setAttribute('fill', 'url(#trendGradient)');
+      svg.appendChild(area);
+
+      var line = document.createElementNS(ns, 'path');
+      line.setAttribute('d', linePath);
+      line.setAttribute('fill', 'none');
+      line.setAttribute('stroke', 'var(--series-1)');
+      line.setAttribute('stroke-width', 2.5);
+      line.setAttribute('stroke-linecap', 'round');
+      line.setAttribute('stroke-linejoin', 'round');
+      svg.appendChild(line);
+    }
+
+    var lastPoint = points[points.length - 1];
+    if (lastPoint) {
+      var dot = document.createElementNS(ns, 'circle');
+      dot.setAttribute('cx', lastPoint.x);
+      dot.setAttribute('cy', lastPoint.y);
+      dot.setAttribute('r', 4);
+      dot.setAttribute('fill', 'var(--series-1)');
+      dot.setAttribute('stroke', 'var(--card)');
+      dot.setAttribute('stroke-width', 2);
+      svg.appendChild(dot);
+      trendDotEl = dot;
+    } else {
+      trendDotEl = null;
+    }
+  }
+
+  // ---------- Resumen: mover el punto de la curva para ver cada día ----------
+  function moveTrendDot(x, y) {
+    if (!trendDotEl) return;
+    trendDotEl.setAttribute('cx', x);
+    trendDotEl.setAttribute('cy', y);
+  }
+
+  function showTrendTooltip(x, y, dia, val) {
+    var rect = els.trendSvg.getBoundingClientRect();
+    var scaleX = rect.width / trendState.W;
+    var scaleY = rect.height / trendState.H;
+    els.trendTooltip.style.left = (x * scaleX) + 'px';
+    els.trendTooltip.style.top = (y * scaleY) + 'px';
+    els.trendTooltip.textContent = diaLabel(isoForDia(dia)) + ': ' + fmt(val);
+    els.trendTooltip.hidden = false;
+  }
+
+  function updateTrendScrub(clientX) {
+    if (!trendState || !trendState.points.length) return;
+    var rect = els.trendSvg.getBoundingClientRect();
+    if (!rect.width) return;
+    var scaleX = trendState.W / rect.width;
+    var x = (clientX - rect.left) * scaleX;
+
+    var idx = 0, best = Infinity;
+    trendState.points.forEach(function (p, i) {
+      var d = Math.abs(p.x - x);
+      if (d < best) { best = d; idx = i; }
+    });
+
+    var p = trendState.points[idx];
+    moveTrendDot(p.x, p.y);
+    showTrendTooltip(p.x, p.y, idx + 1, trendState.days[idx]);
+  }
+
+  function resetTrendScrub() {
+    if (!trendState || !trendState.points.length) return;
+    var last = trendState.points[trendState.points.length - 1];
+    moveTrendDot(last.x, last.y);
+    els.trendTooltip.hidden = true;
+  }
+
+  var trendScrubbing = false;
+
+  els.trendWrap.addEventListener('pointerdown', function (e) {
+    trendScrubbing = true;
+    if (els.trendWrap.setPointerCapture) els.trendWrap.setPointerCapture(e.pointerId);
+    updateTrendScrub(e.clientX);
+  });
+  els.trendWrap.addEventListener('pointermove', function (e) {
+    if (!trendScrubbing) return;
+    updateTrendScrub(e.clientX);
+  });
+  function endTrendScrub() {
+    if (!trendScrubbing) return;
+    trendScrubbing = false;
+    resetTrendScrub();
+  }
+  els.trendWrap.addEventListener('pointerup', endTrendScrub);
+  els.trendWrap.addEventListener('pointercancel', endTrendScrub);
+  els.trendWrap.addEventListener('pointerleave', endTrendScrub);
+
+  // ---------- Resumen ----------
+  function renderResumen(data) {
+    els.resumenTotalVal.textContent = fmt(data.total || 0);
+    var meses = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+    var mesIdx = parseInt((data.mes || todayISO().slice(0, 7)).split('-')[1], 10) - 1;
+    els.resumenMesLabel.textContent = 'Total de ' + (meses[mesIdx] || '');
+
+    var partes = [];
+    if (data.totalMesAnterior) {
+      var delta = data.total - data.totalMesAnterior;
+      var pct = Math.round((delta / data.totalMesAnterior) * 100);
+      var signo = delta >= 0 ? '+' : '';
+      partes.push((delta >= 0 ? '🔺' : '🔻') + ' ' + signo + pct + '% vs. mes pasado');
+    }
+    if (data.topCategoria) {
+      partes.push('Top: ' + iconFor(data.topCategoria) + ' ' + data.topCategoria);
+    }
+    els.resumenInsight.textContent = partes.join(' · ');
+
+    var activos = state.categorias
+      .map(function (c) { return { nombre: c.nombre, icono: c.icono, value: (data.porCategoria || {})[c.nombre] || 0 }; })
+      .filter(function (e) { return e.value > 0; })
+      .sort(function (a, b) { return b.value - a.value; });
+
+    var top = activos.slice(0, 7);
+    var resto = activos.slice(7);
+    var restoTotal = resto.reduce(function (s, e) { return s + e.value; }, 0);
+
+    var entries = top.map(function (e, i) {
+      return { nombre: e.nombre, icono: e.icono, value: e.value, color: SERIES_COLORS[i] };
+    });
+    if (restoTotal > 0) {
+      entries.push({ nombre: 'Otros (' + resto.length + ')', icono: '•', value: restoTotal, color: OTROS_COLOR });
+    }
+
+    buildTrend(data.porDia || {}, data.diaActual || 1);
+
+    els.resumenCategorias.innerHTML = '';
+    if (!entries.length) {
+      els.resumenCategorias.innerHTML = '<div class="empty">Todavía no hay gastos este mes.</div>';
+    } else {
+      var bar = document.createElement('div');
+      bar.className = 'split-bar';
+      entries.forEach(function (e) {
+        var seg = document.createElement('div');
+        seg.style.flex = e.value + ' 1 0%';
+        seg.style.background = e.color;
+        bar.appendChild(seg);
+      });
+      els.resumenCategorias.appendChild(bar);
+
+      entries.forEach(function (e) {
+        var row = document.createElement('div');
+        row.className = 'legend-row';
+        row.innerHTML =
+          '<div class="legend-name"><span class="legend-dot" style="background:' + e.color + '"></span>' + e.icono + ' ' + e.nombre + '</div>' +
+          '<div class="legend-amt">' + fmt(e.value) + '</div>';
+        els.resumenCategorias.appendChild(row);
+      });
+    }
+
+    els.resumenPersonas.innerHTML = '';
+    state.personas.forEach(function (p) {
+      var val = (data.porPersona || {})[p] || 0;
+      var card = document.createElement('div');
+      card.className = 'card';
+      card.innerHTML = '<div class="p-name">' + p + '</div><div class="p-amt">' + fmt(val) + '</div>';
+      els.resumenPersonas.appendChild(card);
+    });
+  }
+
+  function loadResumen() {
+    Api.call('getResumenMes').then(renderResumen);
+  }
+
+  // ---------- Categorías (gestión) ----------
+  function renderCatManageList() {
+    els.catManageList.innerHTML = '';
+    state.categorias.forEach(function (c) {
+      var row = document.createElement('div');
+      row.className = 'cat-manage-row';
+      row.innerHTML =
+        '<input type="text" class="cat-icono-input" maxlength="4" value="' + c.icono + '">' +
+        '<input type="text" class="cat-nombre-input" value="' + c.nombre + '">' +
+        '<button class="icon-btn cat-save" type="button" title="Guardar">✓</button>' +
+        '<button class="icon-btn cat-del" type="button" title="Borrar">✕</button>';
+
+      var iconoInput = row.querySelector('.cat-icono-input');
+      var nombreInput = row.querySelector('.cat-nombre-input');
+
+      row.querySelector('.cat-save').addEventListener('click', function () {
+        var nuevoNombre = nombreInput.value.trim();
+        var nuevoIcono = iconoInput.value.trim() || '💸';
+        if (!nuevoNombre) return;
+        Api.call('updateCategoria', c.nombre, nuevoNombre, nuevoIcono).then(function () {
+          showToast('Categoría actualizada ✓');
+          return reloadCategorias();
+        }).catch(function (err) {
+          showToast('Error: ' + (err && err.message ? err.message : err));
+        });
+      });
+
+      row.querySelector('.cat-del').addEventListener('click', function () {
+        if (!confirm('¿Borrar la categoría "' + c.nombre + '"? Los gastos ya cargados no se van a borrar.')) return;
+        Api.call('deleteCategoria', c.nombre).then(function () {
+          showToast('Categoría borrada');
+          return reloadCategorias();
+        }).catch(function (err) {
+          showToast('Error: ' + (err && err.message ? err.message : err));
+        });
+      });
+
+      els.catManageList.appendChild(row);
+    });
+  }
+
+  function reloadCategorias() {
+    return Api.call('getCategorias').then(function (cats) {
+      state.categorias = cats;
+      renderCategoriaSelect(els.catSelect, state.categoriaSel);
+      renderCatManageList();
+    });
+  }
+
+  els.newCatAdd.addEventListener('click', function () {
+    var nombre = els.newCatNombre.value.trim();
+    var icono = els.newCatIcono.value.trim() || '💸';
+    if (!nombre) { showToast('Ponele un nombre a la categoría'); return; }
+    Api.call('addCategoria', nombre, icono).then(function () {
+      els.newCatNombre.value = '';
+      els.newCatIcono.value = '';
+      showToast('Categoría agregada ✓');
+      return reloadCategorias();
+    }).catch(function (err) {
+      showToast('Error: ' + (err && err.message ? err.message : err));
+    });
+  });
+
+  els.btnSettings.addEventListener('click', function () {
+    renderCatManageList();
+    els.catOverlay.hidden = false;
+  });
+  els.catModalClose.addEventListener('click', function () { els.catOverlay.hidden = true; });
+  els.catOverlay.addEventListener('click', function (e) {
+    if (e.target === els.catOverlay) els.catOverlay.hidden = true;
+  });
+
+  // ---------- Navegación ----------
+  var views = {
+    cargar: document.getElementById('view-cargar'),
+    historial: document.getElementById('view-historial'),
+    resumen: document.getElementById('view-resumen')
+  };
+
+  document.querySelectorAll('nav.bottom-nav button').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var target = btn.dataset.view;
+      Object.keys(views).forEach(function (key) {
+        views[key].hidden = key !== target;
+      });
+      document.querySelectorAll('nav.bottom-nav button').forEach(function (b) {
+        b.classList.toggle('active', b === btn);
+      });
+      els.fabAdd.hidden = target !== 'historial';
+      if (target === 'historial') loadHistorial();
+      if (target === 'resumen') loadResumen();
+    });
+  });
+
+  // ---------- Init ----------
+  if ('serviceWorker' in navigator && location.protocol === 'https:') {
+    navigator.serviceWorker.register('sw.js').catch(function () {});
+  }
+
+  initTheme();
+  els.fecha.value = todayISO();
+
+  Promise.all([Api.call('getCategorias'), Api.call('getPersonas')]).then(function (res) {
+    state.categorias = res[0];
+    state.personas = res[1];
+    renderCategoriaSelect(els.catSelect, null);
+    renderPersonas();
+    els.subtitle.textContent = 'Registren un gasto en segundos';
+  }).catch(function (err) {
+    els.subtitle.textContent = 'Error cargando datos: ' + (err && err.message ? err.message : err);
+  });
+})();
+</script>

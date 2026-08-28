@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Gastos">
+  <?!= include('Stylesheet'); ?>
+</head>
+<body>
+  <div id="app">
+    <header class="top">
+      <div class="top-row">
+        <div>
+          <h1>Gastos Fran &amp; Marti</h1>
+          <p id="subtitle">Cargando…</p>
+        </div>
+        <div class="top-actions">
+          <button class="icon-btn" id="btn-settings" type="button" title="Ajustes">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="4" y1="6" x2="20" y2="6"></line>
+              <circle cx="14" cy="6" r="2"></circle>
+              <line x1="4" y1="12" x2="20" y2="12"></line>
+              <circle cx="8" cy="12" r="2"></circle>
+              <line x1="4" y1="18" x2="20" y2="18"></line>
+              <circle cx="16" cy="18" r="2"></circle>
+            </svg>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <div class="view-scroll">
+    <!-- ===== Vista: Cargar gasto ===== -->
+    <section class="view" id="view-cargar">
+      <div class="card">
+        <div class="amount-label">Monto</div>
+        <div class="amount-input">
+          <span>$</span>
+          <input type="text" inputmode="decimal" id="input-monto" placeholder="0" autocomplete="off">
+        </div>
+      </div>
+
+      <div class="field">
+        <label for="cat-select">Categoría</label>
+        <select id="cat-select">
+          <option value="" disabled selected>Elegí una categoría</option>
+        </select>
+      </div>
+
+      <div class="section-label" style="margin-top:16px">¿Quién pagó?</div>
+      <div class="segmented" id="persona-toggle"></div>
+
+      <div class="field" style="margin-top:16px">
+        <label for="input-fecha">Fecha</label>
+        <input type="date" id="input-fecha">
+      </div>
+
+      <div class="field">
+        <label for="input-nota">Nota (opcional)</label>
+        <input type="text" id="input-nota" placeholder="Ej: cena con amigos" autocomplete="off">
+      </div>
+
+      <button class="btn-primary" id="btn-guardar" disabled>Guardar gasto</button>
+    </section>
+
+    <!-- ===== Vista: Historial ===== -->
+    <section class="view" id="view-historial" hidden>
+      <div id="historial-list"></div>
+    </section>
+
+    <!-- ===== Vista: Resumen ===== -->
+    <section class="view" id="view-resumen" hidden>
+      <div class="card resumen-total">
+        <div class="trend-wrap" id="trend-wrap">
+          <svg viewBox="0 0 300 100" id="trend-svg"></svg>
+          <div class="trend-tooltip" id="trend-tooltip" hidden></div>
+        </div>
+        <div class="value" id="resumen-total-val">$0</div>
+        <div class="label" id="resumen-mes-label">Total del mes</div>
+        <div class="insight" id="resumen-insight"></div>
+      </div>
+
+      <div class="section-label">Por categoría</div>
+      <div class="card" id="resumen-categorias"></div>
+
+      <div class="section-label">Pagado por cada uno</div>
+      <div class="persona-split" id="resumen-personas"></div>
+    </section>
+    </div>
+
+    <div class="toast" id="toast"></div>
+
+    <nav class="bottom-nav">
+      <button data-view="cargar" class="active">
+        <span class="nav-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="12" y1="5" x2="12" y2="19"></line>
+            <line x1="5" y1="12" x2="19" y2="12"></line>
+          </svg>
+        </span>
+        <span>Cargar</span>
+      </button>
+      <button data-view="historial">
+        <span class="nav-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="8" y1="6" x2="20" y2="6"></line>
+            <line x1="8" y1="12" x2="20" y2="12"></line>
+            <line x1="8" y1="18" x2="20" y2="18"></line>
+            <line x1="4" y1="6" x2="4.01" y2="6"></line>
+            <line x1="4" y1="12" x2="4.01" y2="12"></line>
+            <line x1="4" y1="18" x2="4.01" y2="18"></line>
+          </svg>
+        </span>
+        <span>Historial</span>
+      </button>
+      <button data-view="resumen">
+        <span class="nav-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="6" y1="20" x2="6" y2="14"></line>
+            <line x1="12" y1="20" x2="12" y2="8"></line>
+            <line x1="18" y1="20" x2="18" y2="4"></line>
+          </svg>
+        </span>
+        <span>Resumen</span>
+      </button>
+    </nav>
+
+    <button class="fab" id="fab-add" type="button" title="Agregar gasto" hidden>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="12" y1="5" x2="12" y2="19"></line>
+        <line x1="5" y1="12" x2="19" y2="12"></line>
+      </svg>
+    </button>
+
+    <!-- ===== Modal: editar gasto ===== -->
+    <div class="modal-overlay" id="edit-overlay" hidden>
+      <div class="modal-sheet">
+        <div class="modal-header">
+          <h2>Editar gasto</h2>
+          <button class="icon-btn" id="edit-close" type="button">✕</button>
+        </div>
+
+        <div class="card">
+          <div class="amount-label">Monto</div>
+          <div class="amount-input">
+            <span>$</span>
+            <input type="text" inputmode="decimal" id="edit-monto" placeholder="0" autocomplete="off">
+          </div>
+        </div>
+
+        <div class="field">
+          <label for="edit-cat-select">Categoría</label>
+          <select id="edit-cat-select"></select>
+        </div>
+
+        <div class="section-label" style="margin-top:16px">¿Quién pagó?</div>
+        <div class="segmented" id="edit-persona-toggle"></div>
+
+        <div class="field" style="margin-top:16px">
+          <label for="edit-fecha">Fecha</label>
+          <input type="date" id="edit-fecha">
+        </div>
+
+        <div class="field">
+          <label for="edit-nota">Nota</label>
+          <input type="text" id="edit-nota" autocomplete="off">
+        </div>
+
+        <div class="modal-actions">
+          <button class="btn-danger" id="edit-delete" type="button">Borrar</button>
+          <button class="btn-primary" id="edit-save" type="button">Guardar cambios</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== Modal: agregar gasto ===== -->
+    <div class="modal-overlay" id="add-overlay" hidden>
+      <div class="modal-sheet">
+        <div class="modal-header">
+          <h2>Nuevo gasto</h2>
+          <button class="icon-btn" id="add-close" type="button">✕</button>
+        </div>
+
+        <div class="card">
+          <div class="amount-label">Monto</div>
+          <div class="amount-input">
+            <span>$</span>
+            <input type="text" inputmode="decimal" id="add-monto" placeholder="0" autocomplete="off">
+          </div>
+        </div>
+
+        <div class="field">
+          <label for="add-cat-select">Categoría</label>
+          <select id="add-cat-select"></select>
+        </div>
+
+        <div class="section-label" style="margin-top:16px">¿Quién pagó?</div>
+        <div class="segmented" id="add-persona-toggle"></div>
+
+        <div class="field" style="margin-top:16px">
+          <label for="add-fecha">Fecha</label>
+          <input type="date" id="add-fecha">
+        </div>
+
+        <div class="field">
+          <label for="add-nota">Nota (opcional)</label>
+          <input type="text" id="add-nota" placeholder="Ej: cena con amigos" autocomplete="off">
+        </div>
+
+        <div class="modal-actions">
+          <button class="btn-primary" id="add-save" type="button">Guardar gasto</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== Modal: categorías ===== -->
+    <div class="modal-overlay" id="cat-overlay" hidden>
+      <div class="modal-sheet">
+        <div class="modal-header">
+          <h2>Ajustes</h2>
+          <button class="icon-btn" id="cat-modal-close" type="button">✕</button>
+        </div>
+
+        <div class="settings-row">
+          <span>Modo oscuro</span>
+          <button class="icon-btn" id="btn-theme" type="button" title="Modo oscuro/claro"></button>
+        </div>
+
+        <div class="section-label" style="margin-top:16px">Categorías</div>
+        <div id="cat-manage-list"></div>
+
+        <div class="section-label" style="margin-top:16px">Agregar categoría</div>
+        <div class="new-cat-row">
+          <input type="text" id="new-cat-icono" maxlength="4" placeholder="🙂" autocomplete="off">
+          <input type="text" id="new-cat-nombre" placeholder="Nombre" autocomplete="off">
+          <button class="btn-primary btn-small" id="new-cat-add" type="button">Agregar</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <?!= include('Script'); ?>
+</body>
+</html>

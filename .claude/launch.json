@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "preview-static",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "http.server", "8850", "--directory", "preview"],
+      "port": 8850
+    }
+  ]
+}
