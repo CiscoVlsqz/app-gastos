@@ -226,8 +226,11 @@
         </div>
 
         <div class="settings-row">
-          <span>Modo oscuro</span>
-          <button class="icon-btn" id="btn-theme" type="button" title="Modo oscuro/claro"></button>
+          <span id="theme-label">Modo oscuro</span>
+          <span class="settings-row-control">
+            <span class="theme-state" id="theme-state"></span>
+            <button class="icon-btn" id="btn-theme" type="button" role="switch" aria-checked="false" aria-labelledby="theme-label" title="Modo oscuro/claro"></button>
+          </span>
         </div>
 
         <div class="section-label" style="margin-top:16px">Categorías</div>

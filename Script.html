@@ -66,7 +66,9 @@
     personaSel: null,
     editId: null,
     editPersonaSel: null,
-    addPersonaSel: null
+    addPersonaSel: null,
+    flashNewest: false,
+    flashId: null
   };
 
   var els = {
@@ -89,6 +91,7 @@
     resumenCategorias: document.getElementById('resumen-categorias'),
     resumenPersonas: document.getElementById('resumen-personas'),
     btnTheme: document.getElementById('btn-theme'),
+    themeState: document.getElementById('theme-state'),
     btnSettings: document.getElementById('btn-settings'),
     editOverlay: document.getElementById('edit-overlay'),
     editClose: document.getElementById('edit-close'),
@@ -329,8 +332,11 @@
     '</svg>';
 
   function applyTheme(theme) {
-    document.documentElement.classList.toggle('dark', theme === 'dark');
-    els.btnTheme.innerHTML = theme === 'dark' ? ICON_SUN : ICON_MOON;
+    var isDark = theme === 'dark';
+    document.documentElement.classList.toggle('dark', isDark);
+    els.btnTheme.innerHTML = isDark ? ICON_SUN : ICON_MOON;
+    els.btnTheme.setAttribute('aria-checked', isDark ? 'true' : 'false');
+    if (els.themeState) els.themeState.textContent = isDark ? 'Oscuro' : 'Claro';
   }
 
   function initTheme() {
@@ -406,7 +412,7 @@
       pagadoPor: state.personaSel,
       fecha: els.fecha.value || todayISO(),
       nota: els.nota.value.trim()
-    }).then(function () {
+    }).then(function (res) {
       showToast('Gasto guardado ✓');
       els.monto.value = '';
       els.nota.value = '';
@@ -414,6 +420,8 @@
       els.catSelect.value = '';
       state.personaSel = null;
       Array.prototype.forEach.call(els.personaToggle.children, function (el) { el.classList.remove('active'); });
+      state.flashNewest = true;
+      state.flashId = res && res.id != null ? res.id : null;
       loadHistorial();
       loadResumen();
     }).catch(function (err) {
@@ -466,6 +474,7 @@
       grupos[fecha].forEach(function (m) {
         var item = document.createElement('div');
         item.className = 'mov-item';
+        if (m.id != null) item.setAttribute('data-id', m.id);
         item.innerHTML =
           '<div class="icon">' + iconFor(m.categoria) + '</div>' +
           '<div class="info">' +
@@ -479,6 +488,22 @@
 
       els.historialList.appendChild(group);
     });
+
+    // Tras guardar: subir al tope y resaltar el gasto recién agregado.
+    if (state.flashNewest && !views.historial.hidden) {
+      state.flashNewest = false;
+      if (viewScrollEl) viewScrollEl.scrollTop = 0;
+      var nuevo = null;
+      if (state.flashId != null) {
+        nuevo = els.historialList.querySelector('.mov-item[data-id="' + String(state.flashId).replace(/"/g, '\\"') + '"]');
+      }
+      if (!nuevo) nuevo = els.historialList.querySelector('.mov-item');
+      state.flashId = null;
+      if (nuevo) {
+        nuevo.classList.add('just-added');
+        setTimeout(function () { nuevo.classList.remove('just-added'); }, 1100);
+      }
+    }
   }
 
   function historialSkeletonHTML() {
@@ -561,8 +586,10 @@
       pagadoPor: state.addPersonaSel,
       fecha: els.addFecha.value || todayISO(),
       nota: els.addNota.value.trim()
-    }).then(function () {
+    }).then(function (res) {
       showToast('Gasto guardado ✓');
+      state.flashNewest = true;
+      state.flashId = res && res.id != null ? res.id : null;
       closeAddModal();
       loadHistorial();
       loadResumen();

@@ -19,7 +19,7 @@
     --series-1: #2a78d6;
     --series-2: #1baf7a;
     --series-3: #eda100;
-    --series-4: #008300;
+    --series-4: #8d6a2f;
     --series-5: #4a3aa7;
     --series-6: #e34948;
     --series-7: #e87ba4;
@@ -41,10 +41,10 @@
     --series-1: #3987e5;
     --series-2: #199e70;
     --series-3: #c98500;
-    --series-4: #008300;
+    --series-4: #b08838;
     --series-5: #9085e9;
     --series-6: #e66767;
-    --series-7: #d55181;
+    --series-7: #df7ab0;
   }
 
   * { box-sizing: border-box; }
@@ -102,7 +102,10 @@
 
   header.top {
     flex-shrink: 0;
-    padding: calc(20px + env(safe-area-inset-top, 0px)) 20px 8px;
+    padding: calc(20px + env(safe-area-inset-top, 0px))
+             max(20px, env(safe-area-inset-right, 0px))
+             8px
+             max(20px, env(safe-area-inset-left, 0px));
   }
 
   .top-row {
@@ -131,7 +134,9 @@
     color: var(--muted);
   }
 
-  .view { padding: 12px 16px 24px; }
+  .view {
+    padding: 12px max(16px, env(safe-area-inset-right, 0px)) 24px max(16px, env(safe-area-inset-left, 0px));
+  }
   .view[hidden] { display: none; }
 
   /* Aire extra al fondo para que el FAB "+" no tape el último movimiento */
@@ -443,6 +448,13 @@
     white-space: nowrap;
   }
 
+  @keyframes flash {
+    0% { background: var(--accent-soft); }
+    100% { background: var(--card); }
+  }
+
+  .mov-item.just-added { animation: flash 1s ease-out; }
+
   .empty {
     text-align: center;
     color: var(--muted);
@@ -603,6 +615,8 @@
     margin-bottom: 14px;
   }
 
+  .split-bar > div { min-width: 4px; }
+
   .legend-row {
     display: flex;
     align-items: center;
@@ -745,7 +759,10 @@
     overflow-y: auto;
     overscroll-behavior: contain;
     border-radius: 28px 28px 0 0;
-    padding: 20px 20px calc(20px + var(--safe-bottom));
+    padding: 20px
+             max(20px, env(safe-area-inset-right, 0px))
+             calc(20px + var(--safe-bottom))
+             max(20px, env(safe-area-inset-left, 0px));
   }
 
   .modal-header {
@@ -753,6 +770,11 @@
     justify-content: space-between;
     align-items: center;
     margin-bottom: 12px;
+    position: sticky;
+    top: 0;
+    background: var(--bg);
+    z-index: 1;
+    padding-block: 8px;
   }
 
   .modal-header h2 {
@@ -775,6 +797,18 @@
     padding: 4px 2px 16px;
     font-size: 15px;
     font-weight: 600;
+  }
+
+  .settings-row-control {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .theme-state {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--muted);
   }
 
   .cat-manage-row {
@@ -838,6 +872,16 @@
     font-size: 15px;
     line-height: 1.45;
     color: var(--text);
+  }
+
+  /* ---------- Hover solo con puntero fino (desktop) ---------- */
+  @media (hover: hover) {
+    .btn-primary:not(:disabled):hover { opacity: 0.92; }
+    .icon-btn:hover { border-color: var(--muted); }
+    .mov-item:hover {
+      box-shadow: 0 1px 2px rgba(20, 20, 20, 0.06), 0 20px 40px rgba(20, 20, 20, 0.12);
+    }
+    nav.bottom-nav button:not(.active):hover { color: var(--text); }
   }
 
   /* ---------- Responsive: tablet / desktop ---------- */
