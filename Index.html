@@ -18,7 +18,7 @@
           <p id="subtitle">Cargando…</p>
         </div>
         <div class="top-actions">
-          <button class="icon-btn" id="btn-settings" type="button" title="Ajustes">
+          <button class="icon-btn" id="btn-settings" type="button" title="Ajustes" aria-label="Ajustes">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <line x1="4" y1="6" x2="20" y2="6"></line>
               <circle cx="14" cy="6" r="2"></circle>
@@ -74,6 +74,7 @@
     <!-- ===== Vista: Resumen ===== -->
     <section class="view" id="view-resumen" hidden>
       <div class="card resumen-total">
+        <div class="trend-caption" id="trend-caption">Gasto por día · deslizá para ver el detalle</div>
         <div class="trend-wrap" id="trend-wrap">
           <svg viewBox="0 0 300 100" id="trend-svg"></svg>
           <div class="trend-tooltip" id="trend-tooltip" hidden></div>
@@ -140,7 +141,7 @@
       <div class="modal-sheet">
         <div class="modal-header">
           <h2>Editar gasto</h2>
-          <button class="icon-btn" id="edit-close" type="button">✕</button>
+          <button class="icon-btn" id="edit-close" type="button" aria-label="Cerrar">✕</button>
         </div>
 
         <div class="card">
@@ -181,7 +182,7 @@
       <div class="modal-sheet">
         <div class="modal-header">
           <h2>Nuevo gasto</h2>
-          <button class="icon-btn" id="add-close" type="button">✕</button>
+          <button class="icon-btn" id="add-close" type="button" aria-label="Cerrar">✕</button>
         </div>
 
         <div class="card">
@@ -221,7 +222,7 @@
       <div class="modal-sheet">
         <div class="modal-header">
           <h2>Ajustes</h2>
-          <button class="icon-btn" id="cat-modal-close" type="button">✕</button>
+          <button class="icon-btn" id="cat-modal-close" type="button" aria-label="Cerrar">✕</button>
         </div>
 
         <div class="settings-row">
@@ -237,6 +238,21 @@
           <input type="text" id="new-cat-icono" maxlength="4" placeholder="🙂" autocomplete="off">
           <input type="text" id="new-cat-nombre" placeholder="Nombre" autocomplete="off">
           <button class="btn-primary btn-small" id="new-cat-add" type="button">Agregar</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== Modal: confirmación ===== -->
+    <div class="modal-overlay" id="confirm-overlay" hidden>
+      <div class="modal-sheet confirm-sheet" role="alertdialog" aria-labelledby="confirm-title" aria-describedby="confirm-text">
+        <div class="modal-header">
+          <h2 id="confirm-title">¿Confirmás?</h2>
+          <button class="icon-btn" id="confirm-close" type="button" aria-label="Cerrar">✕</button>
+        </div>
+        <p class="confirm-text" id="confirm-text"></p>
+        <div class="modal-actions">
+          <button class="btn-secondary" id="confirm-cancel" type="button">Cancelar</button>
+          <button class="btn-danger-solid" id="confirm-ok" type="button">Borrar</button>
         </div>
       </div>
     </div>

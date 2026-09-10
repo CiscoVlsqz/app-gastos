@@ -85,6 +85,7 @@
     trendWrap: document.getElementById('trend-wrap'),
     trendSvg: document.getElementById('trend-svg'),
     trendTooltip: document.getElementById('trend-tooltip'),
+    trendCaption: document.getElementById('trend-caption'),
     resumenCategorias: document.getElementById('resumen-categorias'),
     resumenPersonas: document.getElementById('resumen-personas'),
     btnTheme: document.getElementById('btn-theme'),
@@ -112,7 +113,13 @@
     catManageList: document.getElementById('cat-manage-list'),
     newCatIcono: document.getElementById('new-cat-icono'),
     newCatNombre: document.getElementById('new-cat-nombre'),
-    newCatAdd: document.getElementById('new-cat-add')
+    newCatAdd: document.getElementById('new-cat-add'),
+    confirmOverlay: document.getElementById('confirm-overlay'),
+    confirmClose: document.getElementById('confirm-close'),
+    confirmTitle: document.getElementById('confirm-title'),
+    confirmText: document.getElementById('confirm-text'),
+    confirmCancel: document.getElementById('confirm-cancel'),
+    confirmOk: document.getElementById('confirm-ok')
   };
 
   function fmt(n) {
@@ -135,10 +142,42 @@
     return new Date(d - tz).toISOString().slice(0, 10);
   }
 
-  function showToast(msg) {
+  var toastTimer = null;
+
+  function showToast(msg, opts) {
+    opts = opts || {};
+    if (toastTimer) clearTimeout(toastTimer);
     els.toast.textContent = msg;
+    els.toast.classList.toggle('toast-error', !!opts.error);
     els.toast.classList.add('show');
-    setTimeout(function () { els.toast.classList.remove('show'); }, 1800);
+    toastTimer = setTimeout(function () {
+      els.toast.classList.remove('show');
+    }, opts.error ? 3800 : 1800);
+  }
+
+  // Mensajes crudos del backend (Code.gs) -> frase es-AR amable. Si no está en
+  // el mapa se muestra el mensaje tal cual llegó.
+  var ERROR_TEXTS = {
+    'No se pudo conectar con el servidor': 'No se pudo conectar con el servidor. Probá de nuevo en un rato.',
+    'Error del servidor': 'El servidor tuvo un problema. Probá de nuevo.',
+    'Monto inválido': 'El monto no es válido. Revisalo y probá de nuevo.',
+    'Faltan datos del movimiento': 'Faltan datos del gasto.',
+    'Faltan datos de la categoría': 'Faltan datos de la categoría.',
+    'Falta el nombre de la categoría': 'Poné un nombre para la categoría.',
+    'Esa categoría ya existe': 'Ya hay una categoría con ese nombre.',
+    'No se encontró la categoría': 'Esa categoría ya no existe. Actualizá la app.',
+    'No se encontró el movimiento': 'Ese gasto ya no existe. Actualizá el historial.',
+    'No hay movimientos cargados': 'Todavía no hay gastos cargados.',
+    'Token inválido': 'La sesión no es válida. Volvé a abrir la app.'
+  };
+
+  function errText(err) {
+    var raw = err && err.message ? err.message : String(err || 'Error');
+    return ERROR_TEXTS[raw] || raw;
+  }
+
+  function toastError(err) {
+    showToast(errText(err), { error: true });
   }
 
   function updateGuardarState() {
@@ -150,24 +189,20 @@
   // Foco atrapado, Escape para cerrar, scroll del fondo bloqueado y foco
   // restaurado al disparador. Lo usan Editar, Nuevo, Ajustes y la hoja de
   // confirmación de borrado.
-  var SHEET_OVERLAYS = [];
-  var sheetPrevFocus = null;
+  var sheetFocusStack = [];
+  var openStack = [];
   var viewScrollEl = document.querySelector('.view-scroll');
 
   function registerSheet(overlay, closeFn) {
     overlay._closeSheet = closeFn;
-    SHEET_OVERLAYS.push(overlay);
   }
 
   function anySheetOpen() {
-    return SHEET_OVERLAYS.some(function (o) { return !o.hidden; });
+    return openStack.length > 0;
   }
 
   function topSheet() {
-    for (var i = SHEET_OVERLAYS.length - 1; i >= 0; i--) {
-      if (!SHEET_OVERLAYS[i].hidden) return SHEET_OVERLAYS[i];
-    }
-    return null;
+    return openStack.length ? openStack[openStack.length - 1] : null;
   }
 
   function focusablesIn(container) {
@@ -178,7 +213,8 @@
   }
 
   function openSheet(overlay, firstFocusEl) {
-    sheetPrevFocus = document.activeElement;
+    if (openStack.indexOf(overlay) === -1) openStack.push(overlay);
+    sheetFocusStack.push(document.activeElement);
     overlay.hidden = false;
     if (viewScrollEl) viewScrollEl.classList.add('scroll-locked');
     var target = firstFocusEl;
@@ -191,11 +227,13 @@
 
   function closeSheet(overlay) {
     overlay.hidden = true;
+    var idx = openStack.indexOf(overlay);
+    if (idx !== -1) openStack.splice(idx, 1);
     if (!anySheetOpen() && viewScrollEl) viewScrollEl.classList.remove('scroll-locked');
-    if (sheetPrevFocus && typeof sheetPrevFocus.focus === 'function') {
-      try { sheetPrevFocus.focus(); } catch (e) {}
+    var prev = sheetFocusStack.pop();
+    if (prev && typeof prev.focus === 'function') {
+      try { prev.focus(); } catch (e) {}
     }
-    sheetPrevFocus = null;
   }
 
   document.addEventListener('keydown', function (e) {
@@ -221,6 +259,57 @@
       e.preventDefault();
       first.focus();
     }
+  });
+
+  // Barra de acción del modal visible cuando se enfoca un campo (teclado móvil).
+  // Sube a la vista el botón principal del .modal-sheet activo.
+  function keepActionVisible(field) {
+    var sheet = field.closest && field.closest('.modal-sheet');
+    if (!sheet) return;
+    var actions = sheet.querySelector('.modal-actions') || sheet.querySelector('.btn-primary');
+    if (actions && actions.scrollIntoView) {
+      try { actions.scrollIntoView({ block: 'nearest' }); } catch (e) { actions.scrollIntoView(false); }
+    }
+  }
+
+  ['edit-overlay', 'add-overlay', 'cat-overlay'].forEach(function (id) {
+    var ov = document.getElementById(id);
+    if (!ov) return;
+    ov.addEventListener('focusin', function (e) {
+      var t = e.target;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA')) {
+        setTimeout(function () { keepActionVisible(t); }, 50);
+      }
+    });
+  });
+
+  // ---------- Hoja de confirmación (reemplaza confirm() nativo) ----------
+  var confirmCb = null;
+
+  function openConfirm(opts) {
+    opts = opts || {};
+    els.confirmTitle.textContent = opts.title || '¿Confirmás?';
+    els.confirmText.textContent = opts.text || '';
+    els.confirmOk.textContent = opts.okText || 'Borrar';
+    confirmCb = typeof opts.onConfirm === 'function' ? opts.onConfirm : null;
+    openSheet(els.confirmOverlay, els.confirmCancel);
+  }
+
+  function closeConfirm() {
+    closeSheet(els.confirmOverlay);
+    confirmCb = null;
+  }
+
+  registerSheet(els.confirmOverlay, closeConfirm);
+  els.confirmClose.addEventListener('click', closeConfirm);
+  els.confirmCancel.addEventListener('click', closeConfirm);
+  els.confirmOverlay.addEventListener('click', function (e) {
+    if (e.target === els.confirmOverlay) closeConfirm();
+  });
+  els.confirmOk.addEventListener('click', function () {
+    var cb = confirmCb;
+    closeConfirm();
+    if (cb) cb();
   });
 
   // ---------- Tema ----------
@@ -328,7 +417,7 @@
       loadHistorial();
       loadResumen();
     }).catch(function (err) {
-      showToast('Error: ' + (err && err.message ? err.message : err));
+      toastError(err);
     }).finally(function () {
       els.btnGuardar.textContent = 'Guardar gasto';
       updateGuardarState();
@@ -392,8 +481,23 @@
     });
   }
 
+  function historialSkeletonHTML() {
+    var one = '<div class="skeleton-item"><div class="sk-icon"></div>' +
+      '<div class="sk-lines"><div class="sk-line"></div><div class="sk-line short"></div></div>' +
+      '<div class="sk-amt"></div></div>';
+    return one + one + one + one;
+  }
+
   function loadHistorial() {
-    Api.call('getMovimientos', 200).then(renderHistorial);
+    if (!els.historialList.querySelector('.day-group')) {
+      els.historialList.innerHTML = historialSkeletonHTML();
+    }
+    return Api.call('getMovimientos', 200).then(renderHistorial).catch(function (err) {
+      if (els.historialList.querySelector('.skeleton-item')) {
+        els.historialList.innerHTML = '<div class="empty">No se pudieron cargar los gastos.</div>';
+      }
+      toastError(err);
+    });
   }
 
   // ---------- Agregar gasto (modal desde Historial) ----------
@@ -463,7 +567,7 @@
       loadHistorial();
       loadResumen();
     }).catch(function (err) {
-      showToast('Error: ' + (err && err.message ? err.message : err));
+      toastError(err);
     }).finally(function () {
       els.addSave.textContent = 'Guardar gasto';
       updateAddState();
@@ -540,7 +644,7 @@
       loadHistorial();
       loadResumen();
     }).catch(function (err) {
-      showToast('Error: ' + (err && err.message ? err.message : err));
+      toastError(err);
     }).finally(function () {
       els.editSave.textContent = 'Guardar cambios';
       updateEditState();
@@ -548,12 +652,24 @@
   });
 
   els.editDelete.addEventListener('click', function () {
-    if (!confirm('¿Borrar este gasto?')) return;
-    Api.call('deleteMovimiento', state.editId).then(function () {
-      showToast('Gasto borrado');
-      closeEditModal();
-      loadHistorial();
-      loadResumen();
+    var id = state.editId;
+    openConfirm({
+      title: 'Borrar gasto',
+      text: '¿Borrar este gasto? No se puede deshacer.',
+      okText: 'Borrar',
+      onConfirm: function () {
+        els.editDelete.disabled = true;
+        Api.call('deleteMovimiento', id).then(function () {
+          showToast('Gasto borrado');
+          closeEditModal();
+          loadHistorial();
+          loadResumen();
+        }).catch(function (err) {
+          toastError(err);
+        }).finally(function () {
+          els.editDelete.disabled = false;
+        });
+      }
     });
   });
 
@@ -673,6 +789,25 @@
     } else {
       trendDotEl = null;
     }
+
+    // Con un solo día no hay curva: mostramos el monto como texto sobre el punto.
+    if (n === 1 && lastPoint) {
+      var txt = document.createElementNS(ns, 'text');
+      txt.setAttribute('x', lastPoint.x);
+      txt.setAttribute('y', Math.max(lastPoint.y - 10, 12));
+      txt.setAttribute('text-anchor', 'middle');
+      txt.setAttribute('fill', 'var(--text)');
+      txt.setAttribute('font-size', '13');
+      txt.setAttribute('font-weight', '700');
+      txt.textContent = fmt(days[0]);
+      svg.appendChild(txt);
+    }
+
+    if (els.trendCaption) {
+      els.trendCaption.textContent = n <= 1
+        ? 'Gasto de hoy'
+        : 'Gasto por día · deslizá para ver el detalle';
+    }
   }
 
   // ---------- Resumen: mover el punto de la curva para ver cada día ----------
@@ -686,10 +821,14 @@
     var rect = els.trendSvg.getBoundingClientRect();
     var scaleX = rect.width / trendState.W;
     var scaleY = rect.height / trendState.H;
-    els.trendTooltip.style.left = (x * scaleX) + 'px';
-    els.trendTooltip.style.top = (y * scaleY) + 'px';
     els.trendTooltip.textContent = diaLabel(isoForDia(dia)) + ': ' + fmt(val);
+    els.trendTooltip.style.top = (y * scaleY) + 'px';
     els.trendTooltip.hidden = false;
+    // Clamp horizontal para que no se corte contra el borde de la card.
+    var wrapW = els.trendWrap.getBoundingClientRect().width || rect.width;
+    var half = els.trendTooltip.offsetWidth / 2;
+    var px = Math.max(half + 2, Math.min(x * scaleX, wrapW - half - 2));
+    els.trendTooltip.style.left = px + 'px';
   }
 
   function updateTrendScrub(clientX) {
@@ -712,9 +851,11 @@
 
   function resetTrendScrub() {
     if (!trendState || !trendState.points.length) return;
-    var last = trendState.points[trendState.points.length - 1];
+    var idx = trendState.points.length - 1;
+    var last = trendState.points[idx];
     moveTrendDot(last.x, last.y);
-    els.trendTooltip.hidden = true;
+    // El tooltip del día de hoy queda visible por defecto (no se oculta).
+    showTrendTooltip(last.x, last.y, idx + 1, trendState.days[idx]);
   }
 
   var trendScrubbing = false;
@@ -745,7 +886,11 @@
     els.resumenMesLabel.textContent = 'Total de ' + (meses[mesIdx] || '');
 
     var partes = [];
-    if (data.totalMesAnterior) {
+    var diaActual = data.diaActual || 0;
+    // Solo comparamos con el mes pasado cuando el mes actual ya está bastante
+    // avanzado: antes del día 28 sería comparar un período parcial contra un
+    // mes completo y siempre daría una "caída" engañosa.
+    if (data.totalMesAnterior && diaActual >= 28) {
       var delta = data.total - data.totalMesAnterior;
       var pct = Math.round((delta / data.totalMesAnterior) * 100);
       var signo = delta >= 0 ? '+' : '';
@@ -753,6 +898,9 @@
     }
     if (data.topCategoria) {
       partes.push('Top: ' + iconFor(data.topCategoria) + ' ' + data.topCategoria);
+    }
+    if (!partes.length && diaActual > 0) {
+      partes.push('Vas ' + fmt(data.total || 0) + ' en ' + diaActual + (diaActual === 1 ? ' día' : ' días'));
     }
     els.resumenInsight.textContent = partes.join(' · ');
 
@@ -773,6 +921,7 @@
     }
 
     buildTrend(data.porDia || {}, data.diaActual || 1);
+    resetTrendScrub();
 
     els.resumenCategorias.innerHTML = '';
     if (!entries.length) {
@@ -808,8 +957,22 @@
     });
   }
 
+  var resumenLoadedOnce = false;
+
   function loadResumen() {
-    Api.call('getResumenMes').then(renderResumen);
+    if (!resumenLoadedOnce) {
+      els.resumenTotalVal.textContent = 'Calculando el mes…';
+      els.resumenTotalVal.classList.add('resumen-loading');
+    }
+    return Api.call('getResumenMes').then(function (data) {
+      resumenLoadedOnce = true;
+      els.resumenTotalVal.classList.remove('resumen-loading');
+      renderResumen(data);
+    }).catch(function (err) {
+      els.resumenTotalVal.classList.remove('resumen-loading');
+      if (!resumenLoadedOnce) els.resumenTotalVal.textContent = '—';
+      toastError(err);
+    });
   }
 
   // ---------- Categorías (gestión) ----------
@@ -826,8 +989,12 @@
 
       var iconoInput = row.querySelector('.cat-icono-input');
       var nombreInput = row.querySelector('.cat-nombre-input');
+      var saveBtn = row.querySelector('.cat-save');
+      var delBtn = row.querySelector('.cat-del');
+      saveBtn.setAttribute('aria-label', 'Guardar cambios de «' + c.nombre + '»');
+      delBtn.setAttribute('aria-label', 'Borrar categoría «' + c.nombre + '»');
 
-      row.querySelector('.cat-save').addEventListener('click', function () {
+      saveBtn.addEventListener('click', function () {
         var nuevoNombre = nombreInput.value.trim();
         var nuevoIcono = iconoInput.value.trim() || '💸';
         if (!nuevoNombre) return;
@@ -835,17 +1002,23 @@
           showToast('Categoría actualizada ✓');
           return reloadCategorias();
         }).catch(function (err) {
-          showToast('Error: ' + (err && err.message ? err.message : err));
+          toastError(err);
         });
       });
 
-      row.querySelector('.cat-del').addEventListener('click', function () {
-        if (!confirm('¿Borrar la categoría "' + c.nombre + '"? Los gastos ya cargados no se van a borrar.')) return;
-        Api.call('deleteCategoria', c.nombre).then(function () {
-          showToast('Categoría borrada');
-          return reloadCategorias();
-        }).catch(function (err) {
-          showToast('Error: ' + (err && err.message ? err.message : err));
+      delBtn.addEventListener('click', function () {
+        openConfirm({
+          title: 'Borrar categoría',
+          text: '¿Borrar la categoría «' + c.nombre + '»? Los gastos ya cargados no se van a borrar.',
+          okText: 'Borrar',
+          onConfirm: function () {
+            Api.call('deleteCategoria', c.nombre).then(function () {
+              showToast('Categoría borrada');
+              return reloadCategorias();
+            }).catch(function (err) {
+              toastError(err);
+            });
+          }
         });
       });
 
@@ -871,7 +1044,7 @@
       showToast('Categoría agregada ✓');
       return reloadCategorias();
     }).catch(function (err) {
-      showToast('Error: ' + (err && err.message ? err.message : err));
+      toastError(err);
     });
   });
 
@@ -895,10 +1068,23 @@
     historial: document.getElementById('view-historial'),
     resumen: document.getElementById('view-resumen')
   };
+  var currentView = 'cargar';
+
+  var SUBTITLES = {
+    cargar: 'Registren un gasto en segundos',
+    historial: 'Últimos movimientos',
+    resumen: 'Cómo venís este mes'
+  };
+
+  function updateSubtitle(view) {
+    if (document.getElementById('init-error') && !document.getElementById('init-error').hidden) return;
+    els.subtitle.textContent = SUBTITLES[view || currentView] || SUBTITLES.cargar;
+  }
 
   document.querySelectorAll('nav.bottom-nav button').forEach(function (btn) {
     btn.addEventListener('click', function () {
       var target = btn.dataset.view;
+      currentView = target;
       Object.keys(views).forEach(function (key) {
         views[key].hidden = key !== target;
       });
@@ -906,6 +1092,7 @@
         b.classList.toggle('active', b === btn);
       });
       els.fabAdd.hidden = target !== 'historial';
+      updateSubtitle(target);
       if (target === 'historial') loadHistorial();
       if (target === 'resumen') loadResumen();
     });
@@ -916,17 +1103,43 @@
     navigator.serviceWorker.register('sw.js').catch(function () {});
   }
 
+  function showInitError(err) {
+    els.subtitle.textContent = 'No se pudieron cargar los datos';
+    var box = document.getElementById('init-error');
+    if (!box) {
+      box = document.createElement('div');
+      box.id = 'init-error';
+      box.className = 'init-error';
+      var msg = document.createElement('span');
+      msg.className = 'init-error-msg';
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'btn-primary btn-small';
+      btn.textContent = 'Reintentar';
+      btn.addEventListener('click', function () { initData(); });
+      box.appendChild(msg);
+      box.appendChild(btn);
+      views.cargar.insertBefore(box, views.cargar.firstChild);
+    }
+    box.querySelector('.init-error-msg').textContent = errText(err);
+    box.hidden = false;
+  }
+
+  function initData() {
+    var box = document.getElementById('init-error');
+    if (box) box.hidden = true;
+    els.subtitle.textContent = 'Cargando…';
+    return Promise.all([Api.call('getCategorias'), Api.call('getPersonas')]).then(function (res) {
+      state.categorias = res[0];
+      state.personas = res[1];
+      renderCategoriaSelect(els.catSelect, null);
+      renderPersonas();
+      updateSubtitle(currentView);
+    }).catch(showInitError);
+  }
+
   initTheme();
   els.fecha.value = todayISO();
-
-  Promise.all([Api.call('getCategorias'), Api.call('getPersonas')]).then(function (res) {
-    state.categorias = res[0];
-    state.personas = res[1];
-    renderCategoriaSelect(els.catSelect, null);
-    renderPersonas();
-    els.subtitle.textContent = 'Registren un gasto en segundos';
-  }).catch(function (err) {
-    els.subtitle.textContent = 'Error cargando datos: ' + (err && err.message ? err.message : err);
-  });
+  initData();
 })();
 </script>
