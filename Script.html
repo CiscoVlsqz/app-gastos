@@ -119,6 +119,16 @@
     return '$' + Math.round(n).toLocaleString('es-AR');
   }
 
+  // Deja dígitos + un solo separador decimal. Colapsa cualquier punto/coma
+  // posterior al primero, así "1.2.3,4" queda como un número no ambiguo y
+  // parseFloat nunca devuelve NaN por separadores repetidos.
+  function normMonto(v) {
+    v = String(v).replace(/[^0-9.,]/g, '').replace(/,/g, '.');
+    var i = v.indexOf('.');
+    if (i === -1) return v;
+    return v.slice(0, i + 1) + v.slice(i + 1).replace(/\./g, '');
+  }
+
   function todayISO() {
     var d = new Date();
     var tz = d.getTimezoneOffset() * 60000;
@@ -132,7 +142,7 @@
   }
 
   function updateGuardarState() {
-    var monto = parseFloat(els.monto.value);
+    var monto = parseFloat(normMonto(els.monto.value));
     els.btnGuardar.disabled = !(monto > 0 && state.categoriaSel && state.personaSel);
   }
 
@@ -290,12 +300,12 @@
   }
 
   els.monto.addEventListener('input', function () {
-    els.monto.value = els.monto.value.replace(/[^0-9.,]/g, '');
+    els.monto.value = normMonto(els.monto.value);
     updateGuardarState();
   });
 
   els.btnGuardar.addEventListener('click', function () {
-    var monto = parseFloat(els.monto.value.replace(',', '.'));
+    var monto = parseFloat(normMonto(els.monto.value));
     if (!(monto > 0) || !state.categoriaSel || !state.personaSel) return;
 
     els.btnGuardar.disabled = true;
@@ -404,15 +414,22 @@
         Array.prototype.forEach.call(els.addPersonaToggle.children, function (el) {
           el.classList.toggle('active', el.textContent === p);
         });
+        updateAddState();
       });
       els.addPersonaToggle.appendChild(btn);
     });
 
+    updateAddState();
     openSheet(els.addOverlay, els.addMonto);
   }
 
   function closeAddModal() {
     closeSheet(els.addOverlay);
+  }
+
+  function updateAddState() {
+    var monto = parseFloat(normMonto(els.addMonto.value));
+    els.addSave.disabled = !(monto > 0 && els.addCatSelect.value && state.addPersonaSel);
   }
 
   registerSheet(els.addOverlay, closeAddModal);
@@ -423,16 +440,15 @@
   });
 
   els.addMonto.addEventListener('input', function () {
-    els.addMonto.value = els.addMonto.value.replace(/[^0-9.,]/g, '');
+    els.addMonto.value = normMonto(els.addMonto.value);
+    updateAddState();
   });
+  els.addCatSelect.addEventListener('change', updateAddState);
 
   els.addSave.addEventListener('click', function () {
-    var monto = parseFloat(els.addMonto.value.replace(',', '.'));
+    var monto = parseFloat(normMonto(els.addMonto.value));
     var categoria = els.addCatSelect.value;
-    if (!(monto > 0) || !categoria || !state.addPersonaSel) {
-      showToast('Completá monto, categoría y quién pagó');
-      return;
-    }
+    if (!(monto > 0) || !categoria || !state.addPersonaSel) return;
     els.addSave.disabled = true;
     els.addSave.textContent = 'Guardando…';
     Api.call('addMovimiento', {
@@ -449,8 +465,8 @@
     }).catch(function (err) {
       showToast('Error: ' + (err && err.message ? err.message : err));
     }).finally(function () {
-      els.addSave.disabled = false;
       els.addSave.textContent = 'Guardar gasto';
+      updateAddState();
     });
   });
 
@@ -474,10 +490,12 @@
         Array.prototype.forEach.call(els.editPersonaToggle.children, function (el) {
           el.classList.toggle('active', el.textContent === p);
         });
+        updateEditState();
       });
       els.editPersonaToggle.appendChild(btn);
     });
 
+    updateEditState();
     openSheet(els.editOverlay, els.editMonto);
   }
 
@@ -486,20 +504,29 @@
     state.editId = null;
   }
 
+  function updateEditState() {
+    var monto = parseFloat(normMonto(els.editMonto.value));
+    els.editSave.disabled = !(monto > 0 && els.editCatSelect.value && state.editPersonaSel);
+  }
+
   registerSheet(els.editOverlay, closeEditModal);
   els.editClose.addEventListener('click', closeEditModal);
   els.editOverlay.addEventListener('click', function (e) {
     if (e.target === els.editOverlay) closeEditModal();
   });
 
+  els.editMonto.addEventListener('input', function () {
+    els.editMonto.value = normMonto(els.editMonto.value);
+    updateEditState();
+  });
+  els.editCatSelect.addEventListener('change', updateEditState);
+
   els.editSave.addEventListener('click', function () {
-    var monto = parseFloat(els.editMonto.value.replace(',', '.'));
+    var monto = parseFloat(normMonto(els.editMonto.value));
     var categoria = els.editCatSelect.value;
-    if (!(monto > 0) || !categoria || !state.editPersonaSel) {
-      showToast('Completá monto, categoría y quién pagó');
-      return;
-    }
+    if (!(monto > 0) || !categoria || !state.editPersonaSel) return;
     els.editSave.disabled = true;
+    els.editSave.textContent = 'Guardando…';
     Api.call('updateMovimiento', {
       id: state.editId,
       categoria: categoria,
@@ -515,7 +542,8 @@
     }).catch(function (err) {
       showToast('Error: ' + (err && err.message ? err.message : err));
     }).finally(function () {
-      els.editSave.disabled = false;
+      els.editSave.textContent = 'Guardar cambios';
+      updateEditState();
     });
   });
 
