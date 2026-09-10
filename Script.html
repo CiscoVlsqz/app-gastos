@@ -136,6 +136,83 @@
     els.btnGuardar.disabled = !(monto > 0 && state.categoriaSel && state.personaSel);
   }
 
+  // ---------- Helper de modales (hoja inferior) ----------
+  // Foco atrapado, Escape para cerrar, scroll del fondo bloqueado y foco
+  // restaurado al disparador. Lo usan Editar, Nuevo, Ajustes y la hoja de
+  // confirmación de borrado.
+  var SHEET_OVERLAYS = [];
+  var sheetPrevFocus = null;
+  var viewScrollEl = document.querySelector('.view-scroll');
+
+  function registerSheet(overlay, closeFn) {
+    overlay._closeSheet = closeFn;
+    SHEET_OVERLAYS.push(overlay);
+  }
+
+  function anySheetOpen() {
+    return SHEET_OVERLAYS.some(function (o) { return !o.hidden; });
+  }
+
+  function topSheet() {
+    for (var i = SHEET_OVERLAYS.length - 1; i >= 0; i--) {
+      if (!SHEET_OVERLAYS[i].hidden) return SHEET_OVERLAYS[i];
+    }
+    return null;
+  }
+
+  function focusablesIn(container) {
+    var sel = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+    return Array.prototype.slice.call(container.querySelectorAll(sel)).filter(function (el) {
+      return el.getClientRects().length > 0;
+    });
+  }
+
+  function openSheet(overlay, firstFocusEl) {
+    sheetPrevFocus = document.activeElement;
+    overlay.hidden = false;
+    if (viewScrollEl) viewScrollEl.classList.add('scroll-locked');
+    var target = firstFocusEl;
+    if (!target) {
+      var f = focusablesIn(overlay.querySelector('.modal-sheet'));
+      target = f.length ? f[0] : null;
+    }
+    if (target) { try { target.focus(); } catch (e) {} }
+  }
+
+  function closeSheet(overlay) {
+    overlay.hidden = true;
+    if (!anySheetOpen() && viewScrollEl) viewScrollEl.classList.remove('scroll-locked');
+    if (sheetPrevFocus && typeof sheetPrevFocus.focus === 'function') {
+      try { sheetPrevFocus.focus(); } catch (e) {}
+    }
+    sheetPrevFocus = null;
+  }
+
+  document.addEventListener('keydown', function (e) {
+    if (e.key !== 'Tab' && e.key !== 'Escape' && e.keyCode !== 9 && e.keyCode !== 27) return;
+    var overlay = topSheet();
+    if (!overlay) return;
+    if (e.key === 'Escape' || e.keyCode === 27) {
+      e.preventDefault();
+      if (typeof overlay._closeSheet === 'function') overlay._closeSheet();
+      return;
+    }
+    var sheet = overlay.querySelector('.modal-sheet');
+    var f = focusablesIn(sheet);
+    if (!f.length) return;
+    var first = f[0], last = f[f.length - 1];
+    if (!sheet.contains(document.activeElement)) {
+      e.preventDefault();
+      first.focus();
+    } else if (e.shiftKey && document.activeElement === first) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && document.activeElement === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  });
+
   // ---------- Tema ----------
   var ICON_SUN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
     '<circle cx="12" cy="12" r="4"></circle>' +
@@ -331,13 +408,14 @@
       els.addPersonaToggle.appendChild(btn);
     });
 
-    els.addOverlay.hidden = false;
+    openSheet(els.addOverlay, els.addMonto);
   }
 
   function closeAddModal() {
-    els.addOverlay.hidden = true;
+    closeSheet(els.addOverlay);
   }
 
+  registerSheet(els.addOverlay, closeAddModal);
   els.fabAdd.addEventListener('click', openAddModal);
   els.addClose.addEventListener('click', closeAddModal);
   els.addOverlay.addEventListener('click', function (e) {
@@ -400,14 +478,15 @@
       els.editPersonaToggle.appendChild(btn);
     });
 
-    els.editOverlay.hidden = false;
+    openSheet(els.editOverlay, els.editMonto);
   }
 
   function closeEditModal() {
-    els.editOverlay.hidden = true;
+    closeSheet(els.editOverlay);
     state.editId = null;
   }
 
+  registerSheet(els.editOverlay, closeEditModal);
   els.editClose.addEventListener('click', closeEditModal);
   els.editOverlay.addEventListener('click', function (e) {
     if (e.target === els.editOverlay) closeEditModal();
@@ -768,13 +847,18 @@
     });
   });
 
+  function closeCatModal() {
+    closeSheet(els.catOverlay);
+  }
+
+  registerSheet(els.catOverlay, closeCatModal);
   els.btnSettings.addEventListener('click', function () {
     renderCatManageList();
-    els.catOverlay.hidden = false;
+    openSheet(els.catOverlay, els.btnTheme);
   });
-  els.catModalClose.addEventListener('click', function () { els.catOverlay.hidden = true; });
+  els.catModalClose.addEventListener('click', closeCatModal);
   els.catOverlay.addEventListener('click', function (e) {
-    if (e.target === els.catOverlay) els.catOverlay.hidden = true;
+    if (e.target === els.catOverlay) closeCatModal();
   });
 
   // ---------- Navegación ----------

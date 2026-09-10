@@ -7,7 +7,7 @@
     --accent-contrast: #ffffff;
     --accent-soft: #f1f1f1;
     --text: #141414;
-    --muted: #8a8a8e;
+    --muted: #6b6b70;
     --border: #e4e4e6;
     --danger: #d9483f;
     --nav-bg: rgba(255, 255, 255, 0.9);
@@ -80,6 +80,8 @@
     scrollbar-width: thin;
     scrollbar-color: var(--border) transparent;
   }
+
+  .view-scroll.scroll-locked { overflow: hidden; }
 
   .view-scroll::-webkit-scrollbar {
     width: 4px;
@@ -191,8 +193,8 @@
     border: 1px solid var(--border);
     background: var(--card);
     color: var(--text);
-    width: 36px;
-    height: 36px;
+    width: 44px;
+    height: 44px;
     border-radius: 50%;
     font-size: 15px;
     cursor: pointer;
@@ -204,8 +206,8 @@
   }
 
   .icon-btn svg {
-    width: 18px;
-    height: 18px;
+    width: 20px;
+    height: 20px;
   }
 
   .segmented {
@@ -282,6 +284,13 @@
 
   select:focus { border-color: var(--accent); }
 
+  .amount-input input:focus-visible,
+  .field input:focus-visible,
+  select:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 3px;
+  }
+
   .btn-primary {
     width: 100%;
     padding: 16px;
@@ -295,8 +304,8 @@
   }
 
   .btn-primary:disabled {
-    background: var(--border);
-    color: var(--muted);
+    background: #d9d9dd;
+    color: #55555a;
     cursor: not-allowed;
   }
 
@@ -613,6 +622,7 @@
     max-width: var(--app-max-width);
     max-height: 88vh;
     overflow-y: auto;
+    overscroll-behavior: contain;
     border-radius: 28px 28px 0 0;
     padding: 20px 20px calc(20px + var(--safe-bottom));
   }
@@ -648,7 +658,7 @@
 
   .cat-manage-row {
     display: flex;
-    gap: 8px;
+    gap: 6px;
     align-items: center;
     margin-bottom: 8px;
   }
@@ -664,9 +674,10 @@
   }
 
   .cat-manage-row .cat-icono-input {
-    width: 44px;
+    width: 40px;
     flex-shrink: 0;
     text-align: center;
+    padding: 8px 4px;
   }
 
   .cat-manage-row .cat-nombre-input { flex: 1; min-width: 0; }
