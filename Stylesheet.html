@@ -292,11 +292,16 @@
 
   select:focus { border-color: var(--accent); }
 
-  .amount-input input:focus-visible,
+  .amount-input input:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 6px;
+    border-radius: 16px;
+  }
+
   .field input:focus-visible,
   select:focus-visible {
     outline: 2px solid var(--accent);
-    outline-offset: 3px;
+    outline-offset: 2px;
   }
 
   .btn-primary {
