@@ -791,7 +791,7 @@ function pollTelegramUpdates_() {
 
   try {
     var startTime = Date.now();
-    var maxDurationMs = 300000;
+    var maxDurationMs = 240000;
     var longPollTimeoutSec = 25;
 
     while (Date.now() - startTime < maxDurationMs) {
@@ -807,11 +807,13 @@ function pollTelegramUpdates_() {
           );
         } catch (fetchErr) {
           Logger.log('pollTelegramUpdates_ error de fetch: ' + fetchErr.message);
+          Utilities.sleep(2000);
           continue;
         }
 
         if (response.getResponseCode() !== 200) {
           Logger.log('pollTelegramUpdates_ error ' + response.getResponseCode() + ': ' + response.getContentText());
+          Utilities.sleep(2000);
           continue;
         }
 
@@ -820,6 +822,7 @@ function pollTelegramUpdates_() {
           json = JSON.parse(response.getContentText());
         } catch (parseErr) {
           Logger.log('pollTelegramUpdates_ error parseando JSON: ' + parseErr.message);
+          Utilities.sleep(2000);
           continue;
         }
 
