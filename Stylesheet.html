@@ -57,6 +57,7 @@
     font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
     -webkit-tap-highlight-color: transparent;
     overscroll-behavior-y: contain;
+    touch-action: manipulation;
   }
 
   #app {
@@ -73,6 +74,7 @@
   }
 
   .view-scroll {
+    position: relative;
     flex: 1 1 auto;
     min-height: 0;
     overflow-y: auto;
@@ -82,6 +84,34 @@
   }
 
   .view-scroll.scroll-locked { overflow: hidden; }
+
+  .pull-refresh {
+    position: absolute;
+    top: 0;
+    left: 50%;
+    width: 30px;
+    height: 30px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    pointer-events: none;
+    transform: translate(-50%, -40px);
+    z-index: 5;
+  }
+
+  .pull-refresh-spinner {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    border: 2.5px solid var(--border);
+    border-top-color: var(--accent);
+    animation: pull-spin 0.7s linear infinite;
+  }
+
+  @keyframes pull-spin {
+    to { transform: rotate(360deg); }
+  }
 
   .view-scroll::-webkit-scrollbar {
     width: 4px;
@@ -391,7 +421,28 @@
     margin: 0 4px 8px;
   }
 
+  .mov-item-wrap {
+    position: relative;
+    border-radius: 20px;
+    margin-bottom: 8px;
+  }
+
+  .mov-item-bg {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    padding-right: 24px;
+    border-radius: 20px;
+    background: var(--danger);
+    color: #fff;
+    font-size: 13px;
+    font-weight: 700;
+  }
+
   .mov-item {
+    position: relative;
     display: flex;
     align-items: center;
     gap: 12px;
@@ -399,8 +450,8 @@
     border-radius: 20px;
     padding: 12px 14px;
     box-shadow: var(--shadow);
-    margin-bottom: 8px;
     cursor: pointer;
+    touch-action: pan-y;
   }
 
   .mov-item .icon {

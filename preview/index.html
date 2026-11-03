@@ -65,6 +65,7 @@
     font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
     -webkit-tap-highlight-color: transparent;
     overscroll-behavior-y: contain;
+    touch-action: manipulation;
   }
 
   #app {
@@ -81,6 +82,7 @@
   }
 
   .view-scroll {
+    position: relative;
     flex: 1 1 auto;
     min-height: 0;
     overflow-y: auto;
@@ -90,6 +92,34 @@
   }
 
   .view-scroll.scroll-locked { overflow: hidden; }
+
+  .pull-refresh {
+    position: absolute;
+    top: 0;
+    left: 50%;
+    width: 30px;
+    height: 30px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    pointer-events: none;
+    transform: translate(-50%, -40px);
+    z-index: 5;
+  }
+
+  .pull-refresh-spinner {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    border: 2.5px solid var(--border);
+    border-top-color: var(--accent);
+    animation: pull-spin 0.7s linear infinite;
+  }
+
+  @keyframes pull-spin {
+    to { transform: rotate(360deg); }
+  }
 
   .view-scroll::-webkit-scrollbar {
     width: 4px;
@@ -399,7 +429,28 @@
     margin: 0 4px 8px;
   }
 
+  .mov-item-wrap {
+    position: relative;
+    border-radius: 20px;
+    margin-bottom: 8px;
+  }
+
+  .mov-item-bg {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    padding-right: 24px;
+    border-radius: 20px;
+    background: var(--danger);
+    color: #fff;
+    font-size: 13px;
+    font-weight: 700;
+  }
+
   .mov-item {
+    position: relative;
     display: flex;
     align-items: center;
     gap: 12px;
@@ -407,8 +458,8 @@
     border-radius: 20px;
     padding: 12px 14px;
     box-shadow: var(--shadow);
-    margin-bottom: 8px;
     cursor: pointer;
+    touch-action: pan-y;
   }
 
   .mov-item .icon {
@@ -938,6 +989,7 @@
     </header>
 
     <div class="view-scroll">
+    <div class="pull-refresh" id="pull-refresh"><div class="pull-refresh-spinner"></div></div>
     <!-- ===== Vista: Cargar gasto ===== -->
     <section class="view" id="view-cargar">
       <div class="card">
@@ -1457,6 +1509,7 @@
 
   // ---------- Hoja de confirmación (reemplaza confirm() nativo) ----------
   var confirmCb = null;
+  var confirmCancelCb = null;
 
   function openConfirm(opts) {
     opts = opts || {};
@@ -1464,25 +1517,56 @@
     els.confirmText.textContent = opts.text || '';
     els.confirmOk.textContent = opts.okText || 'Borrar';
     confirmCb = typeof opts.onConfirm === 'function' ? opts.onConfirm : null;
+    confirmCancelCb = typeof opts.onCancel === 'function' ? opts.onCancel : null;
     openSheet(els.confirmOverlay, els.confirmCancel);
   }
 
-  function closeConfirm() {
+  function closeConfirm(confirmed) {
     closeSheet(els.confirmOverlay);
     confirmCb = null;
+    var cancelCb = confirmCancelCb;
+    confirmCancelCb = null;
+    if (!confirmed && cancelCb) cancelCb();
   }
 
-  registerSheet(els.confirmOverlay, closeConfirm);
-  els.confirmClose.addEventListener('click', closeConfirm);
-  els.confirmCancel.addEventListener('click', closeConfirm);
+  registerSheet(els.confirmOverlay, function () { closeConfirm(false); });
+  els.confirmClose.addEventListener('click', function () { closeConfirm(false); });
+  els.confirmCancel.addEventListener('click', function () { closeConfirm(false); });
   els.confirmOverlay.addEventListener('click', function (e) {
-    if (e.target === els.confirmOverlay) closeConfirm();
+    if (e.target === els.confirmOverlay) closeConfirm(false);
   });
   els.confirmOk.addEventListener('click', function () {
     var cb = confirmCb;
-    closeConfirm();
+    closeConfirm(true);
     if (cb) cb();
   });
+
+  // ---------- Borrar gasto (compartido entre el modal de edición y el swipe) ----------
+  function confirmarBorrarMovimiento(id, opts) {
+    opts = opts || {};
+    openConfirm({
+      title: 'Borrar gasto',
+      text: '¿Borrar este gasto? No se puede deshacer.',
+      okText: 'Borrar',
+      onConfirm: function () {
+        if (typeof opts.onStart === 'function') opts.onStart();
+        Api.call('deleteMovimiento', id).then(function () {
+          showToast('Gasto borrado');
+          if (typeof opts.onDeleted === 'function') opts.onDeleted();
+          loadHistorial();
+          loadResumen();
+        }).catch(function (err) {
+          toastError(err);
+          if (typeof opts.onError === 'function') opts.onError();
+        }).finally(function () {
+          if (typeof opts.onDone === 'function') opts.onDone();
+        });
+      },
+      onCancel: function () {
+        if (typeof opts.onCancel === 'function') opts.onCancel();
+      }
+    });
+  }
 
   // ---------- Tema ----------
   var ICON_SUN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
@@ -1618,6 +1702,76 @@
     return c ? c.icono : '💸';
   }
 
+  // Swipe horizontal para borrar un gasto desde el historial. El tap simple
+  // (sin arrastre horizontal significativo) sigue abriendo el modal de edición.
+  var SWIPE_MAX = 90;
+  var SWIPE_THRESHOLD = 70;
+
+  function attachSwipeToDelete(item, m) {
+    var startX = 0, startY = 0, dx = 0;
+    var tracking = false, decided = false, horizontal = false;
+
+    item.addEventListener('touchstart', function (e) {
+      if (e.touches.length !== 1) return;
+      startX = e.touches[0].clientX;
+      startY = e.touches[0].clientY;
+      dx = 0;
+      tracking = true;
+      decided = false;
+      horizontal = false;
+      item.style.transition = 'none';
+    }, { passive: true });
+
+    item.addEventListener('touchmove', function (e) {
+      if (!tracking) return;
+      var t = e.touches[0];
+      var moveX = t.clientX - startX;
+      var moveY = t.clientY - startY;
+      if (!decided) {
+        if (Math.abs(moveX) < 8 && Math.abs(moveY) < 8) return;
+        decided = true;
+        horizontal = Math.abs(moveX) > Math.abs(moveY);
+      }
+      if (!horizontal) return;
+      dx = Math.max(-SWIPE_MAX, Math.min(0, moveX));
+      item.style.transform = 'translateX(' + dx + 'px)';
+      if (e.cancelable) e.preventDefault();
+    }, { passive: false });
+
+    function settle(toDelete) {
+      tracking = false;
+      item.style.transition = 'transform 0.2s ease';
+      if (toDelete) {
+        item.style.transform = 'translateX(-' + SWIPE_MAX + 'px)';
+        confirmarBorrarMovimiento(m.id, {
+          onCancel: function () { item.style.transform = ''; },
+          onError: function () { item.style.transform = ''; }
+        });
+      } else {
+        item.style.transform = '';
+      }
+    }
+
+    item.addEventListener('touchend', function () {
+      if (!tracking) return;
+      settle(horizontal && dx <= -SWIPE_THRESHOLD);
+    });
+
+    item.addEventListener('touchcancel', function () {
+      if (!tracking) return;
+      settle(false);
+    });
+
+    item.addEventListener('click', function (e) {
+      if (decided && horizontal) {
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
+      openEditModal(m);
+    });
+  }
+
   function renderHistorial(movs) {
     els.historialList.innerHTML = '';
     if (!movs.length) {
@@ -1641,6 +1795,10 @@
       group.appendChild(label);
 
       grupos[fecha].forEach(function (m) {
+        var wrap = document.createElement('div');
+        wrap.className = 'mov-item-wrap';
+        wrap.innerHTML = '<div class="mov-item-bg">Borrar</div>';
+
         var item = document.createElement('div');
         item.className = 'mov-item';
         if (m.id != null) item.setAttribute('data-id', m.id);
@@ -1651,8 +1809,9 @@
             '<div class="meta">' + m.pagadoPor + (m.nota ? ' · ' + m.nota : '') + '</div>' +
           '</div>' +
           '<div class="amount">' + fmt(m.monto) + '</div>';
-        item.addEventListener('click', function () { openEditModal(m); });
-        group.appendChild(item);
+        wrap.appendChild(item);
+        attachSwipeToDelete(item, m);
+        group.appendChild(wrap);
       });
 
       els.historialList.appendChild(group);
@@ -1849,23 +2008,10 @@
 
   els.editDelete.addEventListener('click', function () {
     var id = state.editId;
-    openConfirm({
-      title: 'Borrar gasto',
-      text: '¿Borrar este gasto? No se puede deshacer.',
-      okText: 'Borrar',
-      onConfirm: function () {
-        els.editDelete.disabled = true;
-        Api.call('deleteMovimiento', id).then(function () {
-          showToast('Gasto borrado');
-          closeEditModal();
-          loadHistorial();
-          loadResumen();
-        }).catch(function (err) {
-          toastError(err);
-        }).finally(function () {
-          els.editDelete.disabled = false;
-        });
-      }
+    confirmarBorrarMovimiento(id, {
+      onStart: function () { els.editDelete.disabled = true; },
+      onDeleted: function () { closeEditModal(); },
+      onDone: function () { els.editDelete.disabled = false; }
     });
   });
 
@@ -2293,6 +2439,103 @@
       if (target === 'resumen') loadResumen();
     });
   });
+
+  // Doble-tap/doble-click en Historial y Resumen del nav para refrescar esa
+  // vista, esté activa o no. dblclick cubre mouse y, en varios navegadores,
+  // también el toque; touchend con umbral de tiempo cubre el resto.
+  document.querySelectorAll('nav.bottom-nav button[data-view="historial"], nav.bottom-nav button[data-view="resumen"]').forEach(function (btn) {
+    var view = btn.dataset.view;
+    var lastTapTime = 0;
+
+    function refreshView() {
+      if (view === 'historial') loadHistorial();
+      if (view === 'resumen') loadResumen();
+    }
+
+    btn.addEventListener('touchend', function () {
+      var now = Date.now();
+      if (now - lastTapTime < 350) {
+        lastTapTime = 0;
+        refreshView();
+      } else {
+        lastTapTime = now;
+      }
+    });
+
+    btn.addEventListener('dblclick', refreshView);
+  });
+
+  // ---------- Pull-to-refresh (Historial y Resumen) ----------
+  (function () {
+    var pullEl = document.getElementById('pull-refresh');
+    if (!pullEl || !viewScrollEl) return;
+    var PULL_MAX = 70;
+    var PULL_THRESHOLD = 64;
+    var startY = 0, lastPull = 0;
+    var tracking = false, dragging = false, refreshing = false;
+
+    function setPull(px) {
+      lastPull = Math.max(0, Math.min(PULL_MAX, px));
+      pullEl.style.transform = 'translate(-50%, ' + (lastPull - 40) + 'px)';
+      pullEl.style.opacity = String(Math.min(1, lastPull / PULL_THRESHOLD));
+    }
+
+    function hidePull() {
+      pullEl.style.transition = 'transform 0.2s ease, opacity 0.2s ease';
+      pullEl.style.transform = 'translate(-50%, -40px)';
+      pullEl.style.opacity = '0';
+    }
+
+    viewScrollEl.addEventListener('touchstart', function (e) {
+      if (refreshing || anySheetOpen()) { tracking = false; return; }
+      if (currentView !== 'historial' && currentView !== 'resumen') { tracking = false; return; }
+      if (e.touches.length !== 1 || viewScrollEl.scrollTop > 0) { tracking = false; return; }
+      startY = e.touches[0].clientY;
+      tracking = true;
+      dragging = false;
+      pullEl.style.transition = 'none';
+    }, { passive: true });
+
+    viewScrollEl.addEventListener('touchmove', function (e) {
+      if (!tracking || refreshing) return;
+      var dy = e.touches[0].clientY - startY;
+      if (dy <= 0 || viewScrollEl.scrollTop > 0) {
+        tracking = false;
+        dragging = false;
+        hidePull();
+        return;
+      }
+      dragging = true;
+      setPull(dy * 0.5);
+      if (e.cancelable) e.preventDefault();
+    }, { passive: false });
+
+    viewScrollEl.addEventListener('touchend', function () {
+      if (!tracking) return;
+      tracking = false;
+      if (!dragging) return;
+      dragging = false;
+      if (lastPull >= PULL_THRESHOLD) {
+        refreshing = true;
+        pullEl.style.transition = 'transform 0.15s ease, opacity 0.15s ease';
+        pullEl.style.transform = 'translate(-50%, 16px)';
+        pullEl.style.opacity = '1';
+        var task = currentView === 'resumen' ? loadResumen() : loadHistorial();
+        (task || Promise.resolve()).finally(function () {
+          refreshing = false;
+          hidePull();
+        });
+      } else {
+        hidePull();
+      }
+    });
+
+    viewScrollEl.addEventListener('touchcancel', function () {
+      tracking = false;
+      dragging = false;
+      if (!refreshing) hidePull();
+    });
+  })();
 
   // ---------- Init ----------
   if ('serviceWorker' in navigator && location.protocol === 'https:') {
