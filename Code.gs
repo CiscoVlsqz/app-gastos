@@ -635,6 +635,7 @@ function handleTelegramCallback_(callbackQuery) {
  */
 function groqTranscribe_(audioBlob) {
   var apiKey = PropertiesService.getScriptProperties().getProperty('GROQ_API_KEY');
+  audioBlob.setName('audio.ogg');
   var response = UrlFetchApp.fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
     method: 'post',
     headers: { Authorization: 'Bearer ' + apiKey },
