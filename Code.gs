@@ -786,50 +786,63 @@ function tgDownloadFile_(filePath) {
  * automático sin que nadie esté mirando.
  */
 function pollTelegramUpdates_() {
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(0)) return;
+
   try {
-    var props = PropertiesService.getScriptProperties();
-    var offset = Number(props.getProperty('TELEGRAM_UPDATE_OFFSET') || '0');
+    var startTime = Date.now();
+    var maxDurationMs = 300000;
+    var longPollTimeoutSec = 25;
 
-    var response;
-    try {
-      response = UrlFetchApp.fetch(
-        tgApiUrl_('getUpdates') + '?offset=' + offset + '&timeout=0',
-        { muteHttpExceptions: true }
-      );
-    } catch (fetchErr) {
-      Logger.log('pollTelegramUpdates_ error de fetch: ' + fetchErr.message);
-      return;
-    }
-
-    if (response.getResponseCode() !== 200) {
-      Logger.log('pollTelegramUpdates_ error ' + response.getResponseCode() + ': ' + response.getContentText());
-      return;
-    }
-
-    var json;
-    try {
-      json = JSON.parse(response.getContentText());
-    } catch (parseErr) {
-      Logger.log('pollTelegramUpdates_ error parseando JSON: ' + parseErr.message);
-      return;
-    }
-
-    var updates = (json && json.result) || [];
-    if (!updates.length) return;
-
-    var maxUpdateId = offset;
-    updates.forEach(function (update) {
+    while (Date.now() - startTime < maxDurationMs) {
       try {
-        handleTelegramUpdate_(update);
-      } catch (updateErr) {
-        Logger.log('pollTelegramUpdates_ error en update ' + update.update_id + ': ' + updateErr.message);
-      }
-      if (update.update_id > maxUpdateId) maxUpdateId = update.update_id;
-    });
+        var props = PropertiesService.getScriptProperties();
+        var offset = Number(props.getProperty('TELEGRAM_UPDATE_OFFSET') || '0');
 
-    props.setProperty('TELEGRAM_UPDATE_OFFSET', String(maxUpdateId + 1));
-  } catch (err) {
-    Logger.log('pollTelegramUpdates_ excepción: ' + err.message);
+        var response;
+        try {
+          response = UrlFetchApp.fetch(
+            tgApiUrl_('getUpdates') + '?offset=' + offset + '&timeout=' + longPollTimeoutSec,
+            { muteHttpExceptions: true }
+          );
+        } catch (fetchErr) {
+          Logger.log('pollTelegramUpdates_ error de fetch: ' + fetchErr.message);
+          continue;
+        }
+
+        if (response.getResponseCode() !== 200) {
+          Logger.log('pollTelegramUpdates_ error ' + response.getResponseCode() + ': ' + response.getContentText());
+          continue;
+        }
+
+        var json;
+        try {
+          json = JSON.parse(response.getContentText());
+        } catch (parseErr) {
+          Logger.log('pollTelegramUpdates_ error parseando JSON: ' + parseErr.message);
+          continue;
+        }
+
+        var updates = (json && json.result) || [];
+        if (!updates.length) continue;
+
+        var maxUpdateId = offset;
+        updates.forEach(function (update) {
+          try {
+            handleTelegramUpdate_(update);
+          } catch (updateErr) {
+            Logger.log('pollTelegramUpdates_ error en update ' + update.update_id + ': ' + updateErr.message);
+          }
+          if (update.update_id > maxUpdateId) maxUpdateId = update.update_id;
+        });
+
+        props.setProperty('TELEGRAM_UPDATE_OFFSET', String(maxUpdateId + 1));
+      } catch (iterationErr) {
+        Logger.log('pollTelegramUpdates_ excepción: ' + iterationErr.message);
+      }
+    }
+  } finally {
+    lock.releaseLock();
   }
 }
 
