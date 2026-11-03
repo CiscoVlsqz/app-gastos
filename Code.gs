@@ -87,6 +87,15 @@ function doPost(e) {
   try {
     var data = JSON.parse(e.postData.contents);
 
+    if (data && data.update_id) {
+      try {
+        handleTelegramUpdate_(data);
+      } catch (tgErr) {
+        Logger.log('Error en handleTelegramUpdate_: ' + tgErr.message);
+      }
+      return jsonOut({ ok: true });
+    }
+
     if (data && data.fn) {
       return jsonOut({ ok: true, data: rpcDispatch(data.fn, data.args || []) });
     }
@@ -475,4 +484,302 @@ function getResumenMes() {
     topCategoria: topCategoria,
     topCategoriaMonto: topCategoriaMonto
   };
+}
+
+/**
+ * ===== Bot de Telegram =====
+ *
+ * Flujo: audio de voz -> transcripción (Groq Whisper) -> extracción de
+ * datos del gasto (Groq LLM) -> confirmación con botones -> addMovimiento.
+ *
+ * Secretos (Project Settings > Script Properties, NUNCA hardcodeados):
+ *   TELEGRAM_BOT_TOKEN, GROQ_API_KEY, TELEGRAM_CHAT_FRAN, TELEGRAM_CHAT_MARTI
+ */
+
+/**
+ * Devuelve un mapa { "<chatId>": "Fran", "<chatId>": "Marti" } armado a
+ * partir de las Script Properties. Si TELEGRAM_CHAT_MARTI todavía no está
+ * seteada, Marti simplemente no tiene acceso aún (no rompe nada).
+ */
+function getTelegramPersonas_() {
+  var props = PropertiesService.getScriptProperties();
+  var mapa = {};
+  var chatFran = props.getProperty('TELEGRAM_CHAT_FRAN');
+  var chatMarti = props.getProperty('TELEGRAM_CHAT_MARTI');
+  if (chatFran) mapa[chatFran] = 'Fran';
+  if (chatMarti) mapa[chatMarti] = 'Marti';
+  return mapa;
+}
+
+/**
+ * Devuelve el nombre de la persona dueña de ese chatId, o null si no está
+ * autorizada (en cuyo caso no hay que responderle nada).
+ */
+function resolvePersonaPorChatId_(chatId) {
+  var personas = getTelegramPersonas_();
+  return personas[String(chatId)] || null;
+}
+
+/**
+ * Despacha un update de Telegram según su tipo.
+ */
+function handleTelegramUpdate_(update) {
+  if (update.callback_query) {
+    handleTelegramCallback_(update.callback_query);
+    return;
+  }
+  if (update.message) {
+    handleTelegramMessage_(update.message);
+    return;
+  }
+  // Otro tipo de update (edited_message, etc.): no hacemos nada.
+}
+
+/**
+ * Procesa un mensaje entrante. Solo soportamos audio de voz por ahora.
+ */
+function handleTelegramMessage_(message) {
+  var chatId = message.chat.id;
+  var persona = resolvePersonaPorChatId_(chatId);
+  if (!persona) return;
+
+  if (!message.voice) {
+    tgSendMessage_(chatId, 'Mandame un audio contando el gasto 🎙️');
+    return;
+  }
+
+  var filePath = tgGetFilePath_(message.voice.file_id);
+  var audioBlob = tgDownloadFile_(filePath);
+  var transcript = groqTranscribe_(audioBlob);
+
+  if (!transcript || !transcript.trim()) {
+    tgSendMessage_(chatId, 'No pude escuchar nada, probá de nuevo.');
+    return;
+  }
+
+  var parsed = groqParseExpense_(transcript, getCategorias(), getPersonas());
+
+  if (!parsed || !parsed.monto || !isFinite(Number(parsed.monto)) || Number(parsed.monto) <= 0) {
+    tgSendMessage_(chatId, 'No entendí el monto. Decime de nuevo, por ejemplo: "gasté 5000 pesos en el super"');
+    return;
+  }
+
+  var categorias = getCategorias();
+  var categoriaValida = categorias.some(function (c) { return c.nombre === parsed.categoria; });
+  if (!parsed.categoria || !categoriaValida) {
+    var lista = categorias.map(function (c) { return c.nombre; }).join(', ');
+    tgSendMessage_(chatId, 'No reconocí la categoría. Las categorías válidas son: ' + lista + '. Probá de nuevo aclarando una de esas.');
+    return;
+  }
+
+  var pagadoPor = parsed.pagadoPor;
+  if (!pagadoPor || (pagadoPor !== 'Fran' && pagadoPor !== 'Marti')) {
+    pagadoPor = persona;
+  }
+
+  var fecha = parsed.fecha || Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
+
+  var draft = {
+    categoria: parsed.categoria,
+    monto: Number(parsed.monto),
+    pagadoPor: pagadoPor,
+    fecha: fecha,
+    nota: parsed.nota || ''
+  };
+
+  CacheService.getScriptCache().put('tg_pending_' + chatId, JSON.stringify(draft), 300);
+
+  var montoFormateado = '$' + Math.round(draft.monto).toLocaleString('es-AR');
+  var texto = '¿Confirmás este gasto?\n\n' +
+    '💰 ' + montoFormateado + '\n' +
+    '🏷️ ' + draft.categoria + '\n' +
+    '👤 ' + draft.pagadoPor + '\n' +
+    '📅 ' + draft.fecha +
+    (draft.nota ? '\n📝 ' + draft.nota : '');
+
+  tgSendMessage_(chatId, texto, {
+    inline_keyboard: [[
+      { text: '✅ Confirmar', callback_data: 'confirm' },
+      { text: '❌ Cancelar', callback_data: 'cancel' }
+    ]]
+  });
+}
+
+/**
+ * Procesa el click en los botones de confirmación/cancelación.
+ */
+function handleTelegramCallback_(callbackQuery) {
+  var chatId = callbackQuery.message.chat.id;
+  var persona = resolvePersonaPorChatId_(chatId);
+  if (!persona) return;
+
+  var cache = CacheService.getScriptCache();
+  var key = 'tg_pending_' + chatId;
+  var raw = cache.get(key);
+
+  tgAnswerCallbackQuery_(callbackQuery.id);
+
+  if (!raw) {
+    tgEditMessageText_(chatId, callbackQuery.message.message_id, 'Esto ya expiró, mandá el audio de nuevo.');
+    return;
+  }
+
+  if (callbackQuery.data === 'confirm') {
+    var draft = JSON.parse(raw);
+    cache.remove(key);
+    addMovimiento(draft);
+    tgEditMessageText_(chatId, callbackQuery.message.message_id, '✅ Guardado: $' + draft.monto + ' en ' + draft.categoria);
+    return;
+  }
+
+  if (callbackQuery.data === 'cancel') {
+    cache.remove(key);
+    tgEditMessageText_(chatId, callbackQuery.message.message_id, '❌ Cancelado.');
+    return;
+  }
+}
+
+/**
+ * Transcribe un audio con Groq Whisper. Devuelve '' si falla.
+ */
+function groqTranscribe_(audioBlob) {
+  var apiKey = PropertiesService.getScriptProperties().getProperty('GROQ_API_KEY');
+  var response = UrlFetchApp.fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
+    method: 'post',
+    headers: { Authorization: 'Bearer ' + apiKey },
+    payload: {
+      file: audioBlob,
+      model: 'whisper-large-v3',
+      language: 'es',
+      response_format: 'json'
+    },
+    muteHttpExceptions: true
+  });
+
+  if (response.getResponseCode() !== 200) {
+    Logger.log('groqTranscribe_ error ' + response.getResponseCode() + ': ' + response.getContentText());
+    return '';
+  }
+
+  var json = JSON.parse(response.getContentText());
+  return json.text || '';
+}
+
+/**
+ * Usa un LLM de Groq para extraer los datos del gasto de la transcripción.
+ * Devuelve null si no se pudo parsear.
+ */
+function groqParseExpense_(transcript, categorias, personas) {
+  try {
+    var apiKey = PropertiesService.getScriptProperties().getProperty('GROQ_API_KEY');
+    var nombresCategorias = categorias.map(function (c) { return c.nombre; }).join(', ');
+    var nombresPersonas = personas.join(', ');
+    var hoy = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
+
+    var systemPrompt =
+      'Sos un asistente que extrae datos de un gasto a partir de una transcripción de audio en español rioplatense.\n' +
+      'Categorías válidas (elegí EXACTAMENTE uno de estos nombres, tal cual, o null si ninguno encaja): ' + nombresCategorias + '.\n' +
+      'Personas válidas: ' + nombresPersonas + '.\n' +
+      'Si se menciona quién pagó, usá ese nombre exacto; si no se menciona, dejá "pagadoPor" en null.\n' +
+      'Si se menciona una fecha relativa ("ayer", "anteayer", "el lunes"), resolvela a formato yyyy-MM-dd sabiendo que hoy es ' + hoy + '. Si no se menciona fecha, dejá "fecha" en null.\n' +
+      'El monto debe ser un número (sin símbolo de moneda ni puntos de miles), interpretando correctamente expresiones como "cinco mil", "10 lucas" (=10000), "2 palos" (=2000000), etc.\n' +
+      'Devolvé SOLO un JSON con esta forma exacta, sin texto adicional: { "monto": number|null, "categoria": string|null, "pagadoPor": string|null, "fecha": string|null, "nota": string|null }. "nota" es una nota corta opcional (ej: "verdulería", "nafta YPF") si se menciona un detalle relevante además del monto/categoría, si no null.';
+
+    var response = UrlFetchApp.fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'post',
+      headers: { Authorization: 'Bearer ' + apiKey },
+      contentType: 'application/json',
+      payload: JSON.stringify({
+        model: 'llama-3.3-70b-versatile',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: transcript }
+        ],
+        temperature: 0,
+        response_format: { type: 'json_object' }
+      }),
+      muteHttpExceptions: true
+    });
+
+    if (response.getResponseCode() !== 200) {
+      Logger.log('groqParseExpense_ error ' + response.getResponseCode() + ': ' + response.getContentText());
+      return null;
+    }
+
+    var responseJson = JSON.parse(response.getContentText());
+    return JSON.parse(responseJson.choices[0].message.content);
+  } catch (err) {
+    Logger.log('groqParseExpense_ excepción: ' + err.message);
+    return null;
+  }
+}
+
+/**
+ * Arma la URL de un método de la API de Telegram usando el token guardado
+ * en Script Properties.
+ */
+function tgApiUrl_(method) {
+  var token = PropertiesService.getScriptProperties().getProperty('TELEGRAM_BOT_TOKEN');
+  return 'https://api.telegram.org/bot' + token + '/' + method;
+}
+
+function tgSendMessage_(chatId, text, replyMarkup) {
+  var response = UrlFetchApp.fetch(tgApiUrl_('sendMessage'), {
+    method: 'post',
+    contentType: 'application/json',
+    payload: JSON.stringify({
+      chat_id: chatId,
+      text: text,
+      reply_markup: replyMarkup || undefined
+    }),
+    muteHttpExceptions: true
+  });
+  if (response.getResponseCode() !== 200) {
+    Logger.log('tgSendMessage_ error ' + response.getResponseCode() + ': ' + response.getContentText());
+  }
+}
+
+function tgAnswerCallbackQuery_(callbackQueryId, text) {
+  var response = UrlFetchApp.fetch(tgApiUrl_('answerCallbackQuery'), {
+    method: 'post',
+    contentType: 'application/json',
+    payload: JSON.stringify({
+      callback_query_id: callbackQueryId,
+      text: text || ''
+    }),
+    muteHttpExceptions: true
+  });
+  if (response.getResponseCode() !== 200) {
+    Logger.log('tgAnswerCallbackQuery_ error ' + response.getResponseCode() + ': ' + response.getContentText());
+  }
+}
+
+function tgEditMessageText_(chatId, messageId, text) {
+  var response = UrlFetchApp.fetch(tgApiUrl_('editMessageText'), {
+    method: 'post',
+    contentType: 'application/json',
+    payload: JSON.stringify({
+      chat_id: chatId,
+      message_id: messageId,
+      text: text
+    }),
+    muteHttpExceptions: true
+  });
+  if (response.getResponseCode() !== 200) {
+    Logger.log('tgEditMessageText_ error ' + response.getResponseCode() + ': ' + response.getContentText());
+  }
+}
+
+function tgGetFilePath_(fileId) {
+  var response = UrlFetchApp.fetch(tgApiUrl_('getFile') + '?file_id=' + encodeURIComponent(fileId), {
+    muteHttpExceptions: true
+  });
+  var json = JSON.parse(response.getContentText());
+  return json.result.file_path;
+}
+
+function tgDownloadFile_(filePath) {
+  var token = PropertiesService.getScriptProperties().getProperty('TELEGRAM_BOT_TOKEN');
+  var url = 'https://api.telegram.org/file/bot' + token + '/' + filePath;
+  return UrlFetchApp.fetch(url, { muteHttpExceptions: true }).getBlob();
 }
