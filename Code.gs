@@ -185,6 +185,12 @@ function setup() {
 }
 
 function getCategorias() {
+  var cache = CacheService.getScriptCache();
+  var cached = cache.get('categorias_v1');
+  if (cached) {
+    return JSON.parse(cached);
+  }
+
   var ss = getSS();
   var configSheet = ss.getSheetByName(SHEET_CONFIG);
   var base = CATEGORIAS;
@@ -210,9 +216,21 @@ function getCategorias() {
     }
   }
 
-  return base.slice().sort(function (a, b) {
+  var resultado = base.slice().sort(function (a, b) {
     return (frecuencia[b.nombre] || 0) - (frecuencia[a.nombre] || 0);
   });
+
+  cache.put('categorias_v1', JSON.stringify(resultado), 300);
+  return resultado;
+}
+
+/**
+ * Invalida la cache de getCategorias(). Hay que llamarla en cualquier
+ * operación que pueda cambiar el resultado (altas/bajas/cambios de
+ * movimientos o de categorías).
+ */
+function invalidarCacheCategorias() {
+  CacheService.getScriptCache().remove('categorias_v1');
 }
 
 function getPersonas() {
@@ -233,6 +251,7 @@ function addCategoria(nombre, icono) {
     if (values[i][0] === nombre) throw new Error('Esa categoría ya existe');
   }
   config.appendRow([nombre, icono || '💸']);
+  invalidarCacheCategorias();
   return { ok: true };
 }
 
@@ -270,6 +289,7 @@ function updateCategoria(nombreOriginal, nuevoNombre, nuevoIcono) {
       }
     }
   }
+  invalidarCacheCategorias();
   return { ok: true };
 }
 
@@ -286,6 +306,7 @@ function deleteCategoria(nombre) {
   for (var i = 1; i < values.length; i++) {
     if (values[i][0] === nombre) {
       config.deleteRow(i + 1);
+      invalidarCacheCategorias();
       return { ok: true };
     }
   }
@@ -308,6 +329,7 @@ function addMovimiento(data) {
 
   sheet.appendRow([id, fecha, data.categoria, monto, data.pagadoPor, data.nota || '', new Date()]);
 
+  invalidarCacheCategorias();
   return { id: id };
 }
 
@@ -336,6 +358,7 @@ function updateMovimiento(data) {
       var row = i + 2;
       var fecha = data.fecha ? new Date(data.fecha + 'T12:00:00') : new Date();
       sheet.getRange(row, 2, 1, 5).setValues([[fecha, data.categoria, monto, data.pagadoPor, data.nota || '']]);
+      invalidarCacheCategorias();
       return { ok: true };
     }
   }
@@ -377,6 +400,7 @@ function deleteMovimiento(id) {
   for (var i = 0; i < ids.length; i++) {
     if (ids[i][0] === id) {
       sheet.deleteRow(i + 2);
+      invalidarCacheCategorias();
       return true;
     }
   }
