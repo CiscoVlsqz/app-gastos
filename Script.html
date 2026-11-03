@@ -1248,7 +1248,7 @@
   (function () {
     var pullEl = document.getElementById('pull-refresh');
     if (!pullEl || !viewScrollEl) return;
-    var PULL_MAX = 70;
+    var PULL_MAX = 96;
     var PULL_THRESHOLD = 64;
     var startY = 0, lastPull = 0;
     var tracking = false, dragging = false, refreshing = false;
@@ -1257,6 +1257,7 @@
       lastPull = Math.max(0, Math.min(PULL_MAX, px));
       pullEl.style.transform = 'translate(-50%, ' + (lastPull - 40) + 'px)';
       pullEl.style.opacity = String(Math.min(1, lastPull / PULL_THRESHOLD));
+      pullEl.querySelector('.pull-refresh-spinner').style.transform = 'rotate(' + (lastPull * 4) + 'deg)';
     }
 
     function hidePull() {
@@ -1296,12 +1297,14 @@
       dragging = false;
       if (lastPull >= PULL_THRESHOLD) {
         refreshing = true;
+        pullEl.classList.add('refreshing');
         pullEl.style.transition = 'transform 0.15s ease, opacity 0.15s ease';
         pullEl.style.transform = 'translate(-50%, 16px)';
         pullEl.style.opacity = '1';
         var task = currentView === 'resumen' ? loadResumen() : loadHistorial();
         (task || Promise.resolve()).finally(function () {
           refreshing = false;
+          pullEl.classList.remove('refreshing');
           hidePull();
         });
       } else {

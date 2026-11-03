@@ -97,8 +97,12 @@
     position: absolute;
     top: 0;
     left: 50%;
-    width: 30px;
-    height: 30px;
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: var(--card);
+    border: 1px solid var(--border);
+    box-shadow: var(--shadow);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -109,12 +113,15 @@
   }
 
   .pull-refresh-spinner {
-    width: 20px;
-    height: 20px;
+    width: 18px;
+    height: 18px;
     border-radius: 50%;
-    border: 2.5px solid var(--border);
-    border-top-color: var(--accent);
-    animation: pull-spin 0.7s linear infinite;
+    border: 2.5px solid color-mix(in srgb, var(--muted) 35%, transparent);
+    border-top-color: var(--text);
+  }
+
+  .pull-refresh.refreshing .pull-refresh-spinner {
+    animation: pull-spin 0.85s linear infinite;
   }
 
   @keyframes pull-spin {
@@ -2469,7 +2476,7 @@
   (function () {
     var pullEl = document.getElementById('pull-refresh');
     if (!pullEl || !viewScrollEl) return;
-    var PULL_MAX = 70;
+    var PULL_MAX = 96;
     var PULL_THRESHOLD = 64;
     var startY = 0, lastPull = 0;
     var tracking = false, dragging = false, refreshing = false;
@@ -2478,6 +2485,7 @@
       lastPull = Math.max(0, Math.min(PULL_MAX, px));
       pullEl.style.transform = 'translate(-50%, ' + (lastPull - 40) + 'px)';
       pullEl.style.opacity = String(Math.min(1, lastPull / PULL_THRESHOLD));
+      pullEl.querySelector('.pull-refresh-spinner').style.transform = 'rotate(' + (lastPull * 4) + 'deg)';
     }
 
     function hidePull() {
@@ -2517,12 +2525,14 @@
       dragging = false;
       if (lastPull >= PULL_THRESHOLD) {
         refreshing = true;
+        pullEl.classList.add('refreshing');
         pullEl.style.transition = 'transform 0.15s ease, opacity 0.15s ease';
         pullEl.style.transform = 'translate(-50%, 16px)';
         pullEl.style.opacity = '1';
         var task = currentView === 'resumen' ? loadResumen() : loadHistorial();
         (task || Promise.resolve()).finally(function () {
           refreshing = false;
+          pullEl.classList.remove('refreshing');
           hidePull();
         });
       } else {
