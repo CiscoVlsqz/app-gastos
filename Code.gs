@@ -1,5 +1,5 @@
 /**
- * Gastos Fran & Marti — backend Apps Script
+ * Centio — backend Apps Script
  *
  * Estructura esperada del Spreadsheet (se crea sola la primera vez que
  * corras `setup()` desde el editor de Apps Script):
@@ -68,7 +68,7 @@ function doGet(e) {
 
   return HtmlService.createTemplateFromFile('Index')
     .evaluate()
-    .setTitle('Gastos Fran & Marti')
+    .setTitle('Centio')
     .addMetaTag('viewport', 'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no');
 }
 

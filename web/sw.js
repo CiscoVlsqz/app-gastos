@@ -1,4 +1,4 @@
-/* Service worker de Gastos Fran & Marti.
+/* Service worker de Centio.
  * El build reemplaza __VERSION__ por un timestamp, así cada deploy
  * estrena caché y limpia la anterior.
  *
