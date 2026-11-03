@@ -87,15 +87,6 @@ function doPost(e) {
   try {
     var data = JSON.parse(e.postData.contents);
 
-    if (data && data.update_id) {
-      try {
-        handleTelegramUpdate_(data);
-      } catch (tgErr) {
-        Logger.log('Error en handleTelegramUpdate_: ' + tgErr.message);
-      }
-      return jsonOut({ ok: true });
-    }
-
     if (data && data.fn) {
       return jsonOut({ ok: true, data: rpcDispatch(data.fn, data.args || []) });
     }
@@ -782,4 +773,75 @@ function tgDownloadFile_(filePath) {
   var token = PropertiesService.getScriptProperties().getProperty('TELEGRAM_BOT_TOKEN');
   var url = 'https://api.telegram.org/file/bot' + token + '/' + filePath;
   return UrlFetchApp.fetch(url, { muteHttpExceptions: true }).getBlob();
+}
+
+/**
+ * Punto de entrada del trigger de tiempo (cada 1 minuto). Apps Script no
+ * puede recibir webhooks de Telegram (las URLs /exec devuelven un 302 y
+ * Telegram no sigue redirects), así que en vez de eso hacemos polling:
+ * le preguntamos a Telegram por updates nuevos con getUpdates.
+ *
+ * Nunca debe tirar una excepción hacia afuera: la dispara un trigger
+ * automático sin que nadie esté mirando.
+ */
+function pollTelegramUpdates_() {
+  try {
+    var props = PropertiesService.getScriptProperties();
+    var offset = Number(props.getProperty('TELEGRAM_UPDATE_OFFSET') || '0');
+
+    var response;
+    try {
+      response = UrlFetchApp.fetch(
+        tgApiUrl_('getUpdates') + '?offset=' + offset + '&timeout=0',
+        { muteHttpExceptions: true }
+      );
+    } catch (fetchErr) {
+      Logger.log('pollTelegramUpdates_ error de fetch: ' + fetchErr.message);
+      return;
+    }
+
+    if (response.getResponseCode() !== 200) {
+      Logger.log('pollTelegramUpdates_ error ' + response.getResponseCode() + ': ' + response.getContentText());
+      return;
+    }
+
+    var json;
+    try {
+      json = JSON.parse(response.getContentText());
+    } catch (parseErr) {
+      Logger.log('pollTelegramUpdates_ error parseando JSON: ' + parseErr.message);
+      return;
+    }
+
+    var updates = (json && json.result) || [];
+    if (!updates.length) return;
+
+    var maxUpdateId = offset;
+    updates.forEach(function (update) {
+      try {
+        handleTelegramUpdate_(update);
+      } catch (updateErr) {
+        Logger.log('pollTelegramUpdates_ error en update ' + update.update_id + ': ' + updateErr.message);
+      }
+      if (update.update_id > maxUpdateId) maxUpdateId = update.update_id;
+    });
+
+    props.setProperty('TELEGRAM_UPDATE_OFFSET', String(maxUpdateId + 1));
+  } catch (err) {
+    Logger.log('pollTelegramUpdates_ excepción: ' + err.message);
+  }
+}
+
+/**
+ * Crea el trigger de tiempo que llama a pollTelegramUpdates_ cada 1 minuto.
+ * Correr una sola vez a mano desde el editor de Apps Script.
+ */
+function crearTriggerPollingTelegram_() {
+  ScriptApp.getProjectTriggers().forEach(function (trigger) {
+    if (trigger.getHandlerFunction() === 'pollTelegramUpdates_') {
+      ScriptApp.deleteTrigger(trigger);
+    }
+  });
+
+  ScriptApp.newTrigger('pollTelegramUpdates_').timeBased().everyMinutes(1).create();
 }
