@@ -682,7 +682,7 @@ function groqParseExpense_(transcript, categorias, personas) {
       headers: { Authorization: 'Bearer ' + apiKey },
       contentType: 'application/json',
       payload: JSON.stringify({
-        model: 'llama-3.3-70b-versatile',
+        model: 'openai/gpt-oss-120b',
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: transcript }
