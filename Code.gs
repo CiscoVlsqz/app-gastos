@@ -578,7 +578,7 @@ function handleTelegramMessage_(message) {
     nota: parsed.nota || ''
   };
 
-  CacheService.getScriptCache().put('tg_pending_' + chatId, JSON.stringify(draft), 300);
+  CacheService.getScriptCache().put('tg_pending_' + chatId, JSON.stringify(draft), 1800);
 
   var montoFormateado = '$' + Math.round(draft.monto).toLocaleString('es-AR');
   var texto = '¿Confirmás este gasto?\n\n' +
